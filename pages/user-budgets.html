@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ngân sách tháng · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="user" data-page="user-budgets.html" data-title="Ngân sách tháng">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <section class="card row-between">
+      <div>
+        <h2>Ngân sách theo danh mục — tháng 10/2026</h2>
+        <p class="text-small text-soft mt-1">
+          Ngân sách bạn tạo sẽ được huấn luyện viên xem xét (Chờ duyệt → Đã duyệt / Cần chỉnh sửa).
+        </p>
+      </div>
+      <button class="btn primary" id="addBtn">＋ Tạo ngân sách</button>
+    </section>
+
+    <section class="card mt-5">
+      <div id="budgetBox"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== Modal thêm / sửa ngân sách ===== -->
+<div class="modal-backdrop" id="bModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="bModalTitle">
+    <h3 id="bModalTitle">Tạo ngân sách</h3>
+    <form id="bForm" novalidate>
+      <div class="field">
+        <label class="label" for="bCat">Danh mục *</label>
+        <select class="input" id="bCat"></select>
+        <p class="field-error" id="errCat" hidden>Vui lòng chọn danh mục.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="bAmount">Hạn mức (₫) *</label>
+        <input class="input" id="bAmount" type="number" min="100000" step="100000" placeholder="2000000">
+        <p class="field-error" id="errAmount" hidden>Hạn mức tối thiểu 100.000₫.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn primary" type="submit">Lưu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang user-budgets — Người dùng tạo/sửa hạn mức theo danh mục và xem phản hồi của coach. */
+
+const MONTH = "2026-10";
+const USER_ID = SW.currentUserId("user", "u1");
+
+let editingId = null;
+
+/* ---------- 1. Danh sách ngân sách ---------- */
+async function loadBudgets() {
+  const box = SW.$("#budgetBox");
+
+  await SW.loadInto(box, async () => {
+    const budgets = await API.list("budgets",
+      (b) => b.userId === USER_ID && b.month === MONTH && b.status !== "archived");
+    const expenses = await API.list("transactions",
+      (t) => t.userId === USER_ID && t.status === "active" &&
+             t.type === "expense" && t.date.slice(0, 7) === MONTH);
+
+    if (budgets.length === 0) {
+      return SW.empty("💰", "Chưa có ngân sách nào cho tháng này.<br>Hãy tạo hạn mức cho từng danh mục!");
+    }
+
+    return SW.table(
+      "<th>Danh mục</th><th>Hạn mức</th><th>Đã chi</th><th>Tiến độ</th><th>Trạng thái</th><th></th>",
+      budgets.map((budget) => {
+        const category = API.categoryName(budget.categoryId);
+        const spent = expenses
+          .filter((t) => t.categoryId === budget.categoryId)
+          .reduce((sum, t) => sum + t.amount, 0);
+        const percent = Math.min(100, Math.round((spent / budget.amount) * 100));
+        const over = spent > budget.amount;
+        const note = budget.status === "changes_requested" && budget.note
+          ? `<tr><td colspan="6" class="coach-note-row">💬 Huấn luyện viên: ${SW.escapeHtml(budget.note)}</td></tr>`
+          : "";
+        return `
+          <tr>
+            <td>${category.icon} ${category.name}</td>
+            <td>${SW.fmtVND(budget.amount)}</td>
+            <td class="${over ? "t-neg" : ""}">${SW.fmtVND(spent)}</td>
+            <td class="progress-cell">
+              <div class="progress ${over ? "over" : percent >= 80 ? "warn" : ""}">
+                <span style="width:${percent}%"></span>
+              </div>
+            </td>
+            <td>${SW.statusBadge(budget.status)}</td>
+            <td class="nowrap">
+              <button class="btn ghost sm" data-edit="${budget.id}">Sửa</button>
+              <button class="btn danger sm" data-archive="${budget.id}">Xoá</button>
+            </td>
+          </tr>${note}`;
+      }));
+  }, SW.skeleton(2, 44));
+
+  bindBudgetButtons();
+}
+
+function bindBudgetButtons() {
+  const box = SW.$("#budgetBox");
+
+  SW.onClick("[data-edit]", (button) => openEdit(button.dataset.edit), box);
+
+  SW.onClick("[data-archive]", (button) =>
+    SW.confirmAndRun("Xoá ngân sách này?", "Ngân sách sẽ được lưu trữ.",
+      () => API.archive("budgets", button.dataset.archive),
+      "Đã xoá ngân sách.", loadBudgets), box);
+}
+
+/* ---------- 2. Nạp danh mục vào select ---------- */
+async function loadCategories() {
+  const categories = await API.list("categories", (c) => c.status === "active");
+  SW.$("#bCat").innerHTML = '<option value="">— chọn danh mục —</option>' +
+    categories.map((c) => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join("");
+}
+
+/* ---------- 3. Modal thêm / sửa ---------- */
+SW.$("#addBtn").addEventListener("click", () => {
+  editingId = null;
+  SW.$("#bModalTitle").textContent = "Tạo ngân sách";
+  SW.$("#bForm").reset();
+  SW.clearErrors("#bForm");
+  SW.openModal("bModal");
+});
+
+async function openEdit(id) {
+  const budget = await API.get("budgets", id);
+  editingId = id;
+  SW.$("#bModalTitle").textContent = "Sửa ngân sách";
+  SW.$("#bCat").value = budget.categoryId;
+  SW.$("#bAmount").value = budget.amount;
+  SW.clearErrors("#bForm");
+  SW.openModal("bModal");
+}
+
+SW.$("#bForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  SW.clearErrors("#bForm");
+
+  let ok = true;
+  if (!SW.$("#bCat").value) { SW.markInvalid("#bCat", "#errCat"); ok = false; }
+  if (!(Number(SW.$("#bAmount").value) >= 100000)) {
+    SW.markInvalid("#bAmount", "#errAmount");
+    ok = false;
+  }
+  if (!ok) return;
+
+  const data = {
+    userId: USER_ID,
+    month: MONTH,
+    categoryId: SW.$("#bCat").value,
+    amount: Number(SW.$("#bAmount").value),
+    status: "pending", // sửa xong cũng phải chờ coach duyệt lại
+    note: "",
+  };
+
+  try {
+    if (editingId) {
+      await API.update("budgets", editingId, data);
+      SW.toast("Đã cập nhật — chờ huấn luyện viên duyệt lại.", "info");
+    } else {
+      await API.create("budgets", data);
+      SW.toast("Đã tạo ngân sách — đang chờ duyệt.", "success");
+    }
+    SW.closeModal("bModal");
+    loadBudgets();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  }
+});
+
+/* ---------- 4. Khởi động ---------- */
+(async function init() {
+  await loadCategories();
+  loadBudgets();
+})();
+</script>
+</body>
+</html>

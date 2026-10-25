@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tài nguyên giáo dục · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="coach" data-page="coach-resource-management.html" data-title="Tài nguyên giáo dục">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <section class="card toolbar">
+      <div class="field grow">
+        <label class="label" for="q">Tìm tài nguyên</label>
+        <input class="input" id="q" type="search" placeholder="Tiêu đề…">
+      </div>
+      <div class="field">
+        <label class="label" for="fStatus">Trạng thái</label>
+        <select class="input" id="fStatus">
+          <option value="">Tất cả</option>
+          <option value="draft">Nháp</option>
+          <option value="pending">Chờ kiểm duyệt</option>
+          <option value="published">Đã xuất bản</option>
+          <option value="rejected">Bị từ chối</option>
+          <option value="archived">Đã lưu trữ</option>
+        </select>
+      </div>
+      <button class="btn primary" id="addBtn">＋ Tạo tài nguyên</button>
+    </section>
+
+    <section class="card mt-5">
+      <div id="resBox"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== Modal thêm / sửa tài nguyên ===== -->
+<div class="modal-backdrop" id="rModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rModalTitle">
+    <h3 id="rModalTitle">Tạo tài nguyên</h3>
+    <form id="rForm" novalidate>
+      <div class="field">
+        <label class="label" for="rTitle">Tiêu đề *</label>
+        <input class="input" id="rTitle" type="text" placeholder="VD: Quy tắc 50/30/20 cho sinh viên">
+        <p class="field-error" id="errTitle" hidden>Vui lòng nhập tiêu đề (tối thiểu 5 ký tự).</p>
+      </div>
+      <div class="field">
+        <label class="label" for="rContent">Nội dung *</label>
+        <textarea class="input" id="rContent" rows="4" placeholder="Nội dung chia sẻ…"></textarea>
+        <p class="field-error" id="errContent" hidden>Vui lòng nhập nội dung (tối thiểu 20 ký tự).</p>
+      </div>
+      <div class="field">
+        <label class="label" for="rTag">Chủ đề</label>
+        <select class="input" id="rTag">
+          <option value="ngan-sach">Ngân sách</option>
+          <option value="tiet-kiem">Tiết kiệm</option>
+          <option value="thoi-quen">Thói quen chi tiêu</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn primary" type="submit">Lưu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang coach-resource-management — Coach tạo/sửa tài nguyên giáo dục và gửi kiểm duyệt. */
+
+let editingId = null; // null = đang tạo mới
+
+const RESOURCE_STATUS = {
+  draft: ["Nháp", "muted"],
+  pending: ["Chờ kiểm duyệt", "warning"],
+  published: ["Đã xuất bản", "success"],
+  rejected: ["Bị từ chối", "danger"],
+  archived: ["Đã lưu trữ", "info"],
+};
+
+function resourceBadge(status) {
+  const item = RESOURCE_STATUS[status] || [status, "muted"];
+  return SW.badge(item[0], item[1]);
+}
+
+/* ---------- 1. Danh sách tài nguyên ---------- */
+async function loadResources() {
+  const box = SW.$("#resBox");
+
+  await SW.loadInto(box, async () => {
+    const keyword = SW.$("#q").value.trim().toLowerCase();
+    const status = SW.$("#fStatus").value;
+
+    const items = (await API.list("resources", (r) =>
+      (!keyword || r.title.toLowerCase().includes(keyword)) &&
+      (!status || r.status === status)))
+      .sort((a, b) => (a.status === "draft" ? 0 : 1) - (b.status === "draft" ? 0 : 1));
+
+    if (items.length === 0) {
+      return SW.empty("📚", "Không có tài nguyên phù hợp.<br>Tạo tài nguyên đầu tiên của bạn!");
+    }
+
+    return items.map((resource) => {
+      const canEdit = resource.status === "draft" || resource.status === "rejected";
+      return `
+        <div class="card mb-3">
+          <div class="row-between">
+            <div>
+              <b>${SW.escapeHtml(resource.title)}</b> ${resourceBadge(resource.status)}
+              <p class="text-small text-soft mt-2">
+                ${SW.escapeHtml(resource.content.slice(0, 110))}${resource.content.length > 110 ? "…" : ""}
+              </p>
+              ${resource.status === "rejected" && resource.rejectReason
+                ? `<p class="text-small text-danger mt-2">⛔ Lý do từ chối: ${SW.escapeHtml(resource.rejectReason)}</p>`
+                : ""}
+              <p class="text-small text-muted mt-2">Cập nhật ${SW.fmtDate(resource.updatedAt)}</p>
+            </div>
+            <div class="actions nowrap">
+              ${canEdit ? `<button class="btn ghost sm" data-edit="${resource.id}">Sửa</button>` : ""}
+              ${canEdit ? `<button class="btn sm" data-submit="${resource.id}">📤 Gửi duyệt</button>` : ""}
+              ${resource.status !== "archived" ? `<button class="btn danger sm" data-archive="${resource.id}">Lưu trữ</button>` : ""}
+            </div>
+          </div>
+        </div>`;
+    }).join("");
+  }, SW.skeleton(2, 52));
+
+  bindResourceButtons();
+}
+
+/* Gắn sự kiện sau khi danh sách đã vẽ */
+function bindResourceButtons() {
+  const box = SW.$("#resBox");
+
+  SW.onClick("[data-edit]", (button) => openEdit(button.dataset.edit), box);
+
+  SW.onClick("[data-submit]", (button) =>
+    SW.runAction(() => API.update("resources", button.dataset.submit, { status: "pending", rejectReason: "" }),
+      "Đã gửi tới kiểm duyệt viên.", loadResources), box);
+
+  SW.onClick("[data-archive]", (button) =>
+    SW.confirmAndRun("Lưu trữ tài nguyên?", "Tài nguyên sẽ ẩn khỏi hệ thống.",
+      () => API.archive("resources", button.dataset.archive),
+      "Đã lưu trữ.", loadResources), box);
+}
+
+/* ---------- 2. Modal thêm / sửa ---------- */
+SW.$("#addBtn").addEventListener("click", () => {
+  editingId = null;
+  SW.$("#rModalTitle").textContent = "Tạo tài nguyên";
+  SW.$("#rForm").reset();
+  SW.clearErrors("#rForm");
+  SW.openModal("rModal");
+});
+
+async function openEdit(id) {
+  const resource = await API.get("resources", id);
+  editingId = id;
+  SW.$("#rModalTitle").textContent = "Sửa tài nguyên";
+  SW.$("#rTitle").value = resource.title;
+  SW.$("#rContent").value = resource.content;
+  SW.$("#rTag").value = resource.tag || "ngan-sach";
+  SW.clearErrors("#rForm");
+  SW.openModal("rModal");
+}
+
+SW.$("#rForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  SW.clearErrors("#rForm");
+
+  const title = SW.$("#rTitle").value.trim();
+  const content = SW.$("#rContent").value.trim();
+  let ok = true;
+  if (title.length < 5) { SW.markInvalid("#rTitle", "#errTitle"); ok = false; }
+  if (content.length < 20) { SW.markInvalid("#rContent", "#errContent"); ok = false; }
+  if (!ok) return;
+
+  const data = {
+    title,
+    content,
+    tag: SW.$("#rTag").value,
+    authorId: "c1",
+    updatedAt: new Date().toISOString().slice(0, 10),
+  };
+
+  try {
+    if (editingId) {
+      await API.update("resources", editingId, data);
+      SW.toast("Đã lưu — hãy gửi duyệt khi sẵn sàng.", "success");
+    } else {
+      await API.create("resources", { ...data, status: "draft" });
+      SW.toast("Đã tạo tài nguyên ở trạng thái Nháp.", "success");
+    }
+    SW.closeModal("rModal");
+    loadResources();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  }
+});
+
+/* ---------- 3. Sự kiện lọc ---------- */
+SW.$("#q").addEventListener("input", SW.debounce(loadResources, 250));
+SW.$("#fStatus").addEventListener("change", loadResources);
+
+/* ---------- 4. Khởi động ---------- */
+loadResources();
+</script>
+</body>
+</html>

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hệ thống · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="admin" data-page="admin-system-dashboard.html" data-title="Bảng điều khiển hệ thống">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <!-- KPI hệ thống -->
+    <section class="kpi-grid" id="kpiBox" aria-label="Số liệu hệ thống"></section>
+
+    <div class="grid-2 mt-5">
+      <!-- Nhật ký hệ thống -->
+      <section class="card" aria-labelledby="logTitle">
+        <h2 id="logTitle" class="mb-3">📜 Nhật ký hoạt động gần đây</h2>
+        <div id="logBox"></div>
+      </section>
+
+      <!-- Thông báo (CRUD) -->
+      <section class="card" aria-labelledby="anTitle">
+        <div class="row-between mb-3">
+          <h2 id="anTitle">📢 Thông báo hệ thống</h2>
+          <button class="btn primary sm" id="addAn">＋ Thêm</button>
+        </div>
+        <div id="anBox"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- ===== Modal thêm / sửa thông báo ===== -->
+<div class="modal-backdrop" id="anModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="anModalTitle">
+    <h3 id="anModalTitle">Thêm thông báo</h3>
+    <form id="anForm" novalidate>
+      <div class="field">
+        <label class="label" for="anText">Nội dung thông báo *</label>
+        <textarea class="input" id="anText" rows="3" placeholder="VD: Bảo trì hệ thống lúc 23h tối nay…"></textarea>
+        <p class="field-error" id="errAn" hidden>Vui lòng nhập nội dung (tối thiểu 10 ký tự).</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn primary" type="submit">Lưu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang admin-system-dashboard — Quản trị viên xem KPI, nhật ký và quản lý thông báo. */
+
+let editingAnId = null;
+
+/* ---------- 1. KPI ---------- */
+async function loadKpi() {
+  const box = SW.$("#kpiBox");
+
+  await SW.loadInto(box, async () => {
+    const users = await API.list("users");
+    const transactions = await API.list("transactions", (t) => t.status === "active");
+    const resources = await API.list("resources", (r) => r.status === "published");
+    const feedbacks = await API.list("feedbacks", (f) => f.status === "new" || f.status === "processing");
+
+    return kpi("Tài khoản", users.length, "👤") +
+      kpi("Giao dịch đang hoạt động", transactions.length, "🧾") +
+      kpi("Tài nguyên đã xuất bản", resources.length, "📚") +
+      kpi("Phản hồi chưa xử lý xong", feedbacks.length, "💬");
+  }, SW.skeleton(4, 90));
+}
+
+function kpi(label, value, icon) {
+  return `
+    <div class="kpi">
+      <span class="kpi-label">${icon} ${label}</span>
+      <strong class="kpi-value">${value}</strong>
+    </div>`;
+}
+
+/* ---------- 2. Nhật ký hoạt động ---------- */
+async function loadLogs() {
+  const box = SW.$("#logBox");
+
+  await SW.loadInto(box, async () => {
+    const logs = (await API.list("logs"))
+      .sort((a, b) => b.time.localeCompare(a.time))
+      .slice(0, 8);
+
+    if (logs.length === 0) return SW.empty("📜", "Chưa có hoạt động nào.");
+
+    return SW.table(
+      "<th>Thời gian</th><th>Sự kiện</th>",
+      logs.map((log) => `
+        <tr>
+          <td class="nowrap">${log.time}</td>
+          <td>${SW.escapeHtml(log.action)}</td>
+        </tr>`));
+  }, SW.skeleton(1, 44));
+}
+
+/* ---------- 3. Thông báo (thêm / sửa / xoá) ---------- */
+async function loadAnnouncements() {
+  const box = SW.$("#anBox");
+
+  await SW.loadInto(box, async () => {
+    const items = (await API.list("announcements", (a) => a.status !== "archived"))
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    if (items.length === 0) return SW.empty("📢", "Chưa có thông báo nào.");
+
+    return items.map((announcement) => `
+      <div class="card announcement-card">
+        <div class="row-between items-start">
+          <p class="grow">
+            ${SW.escapeHtml(announcement.text)}<br>
+            <span class="text-small text-muted">${SW.fmtDate(announcement.date)}</span>
+          </p>
+          <div class="nowrap">
+            <button class="btn ghost sm" data-edit="${announcement.id}">Sửa</button>
+            <button class="btn danger sm" data-archive="${announcement.id}">Xoá</button>
+          </div>
+        </div>
+      </div>`).join("");
+  }, SW.skeleton(1, 60));
+
+  bindAnnouncementButtons();
+}
+
+function bindAnnouncementButtons() {
+  const box = SW.$("#anBox");
+
+  SW.onClick("[data-edit]", async (button) => {
+    try {
+      const announcement = await API.get("announcements", button.dataset.edit);
+      editingAnId = announcement.id;
+      SW.$("#anModalTitle").textContent = "Sửa thông báo";
+      SW.$("#anText").value = announcement.text;
+      SW.clearErrors("#anForm");
+      SW.openModal("anModal");
+    } catch (err) {
+      SW.toast(err.message, "error");
+    }
+  }, box);
+
+  SW.onClick("[data-archive]", (button) =>
+    SW.confirmAndRun("Xoá thông báo này?", "Thông báo sẽ được lưu trữ.",
+      () => API.archive("announcements", button.dataset.archive),
+      "Đã xoá thông báo.", loadAnnouncements), box);
+}
+
+SW.$("#addAn").addEventListener("click", () => {
+  editingAnId = null;
+  SW.$("#anModalTitle").textContent = "Thêm thông báo";
+  SW.$("#anForm").reset();
+  SW.clearErrors("#anForm");
+  SW.openModal("anModal");
+});
+
+SW.$("#anForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  SW.clearErrors("#anForm");
+
+  const text = SW.$("#anText").value.trim();
+  if (text.length < 10) {
+    SW.markInvalid("#anText", "#errAn");
+    return;
+  }
+
+  try {
+    if (editingAnId) {
+      await API.update("announcements", editingAnId, { text });
+      SW.toast("Đã cập nhật thông báo.", "success");
+    } else {
+      await API.create("announcements", {
+        text,
+        date: new Date().toISOString().slice(0, 10),
+        status: "active",
+      });
+      SW.toast("Đã đăng thông báo.", "success");
+    }
+    SW.closeModal("anModal");
+    loadAnnouncements();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  }
+});
+
+/* ---------- 4. Khởi động ---------- */
+loadKpi();
+loadLogs();
+loadAnnouncements();
+</script>
+</body>
+</html>

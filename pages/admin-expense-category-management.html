@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Danh mục chi · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="admin" data-page="admin-expense-category-management.html" data-title="Quản lý danh mục chi">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <section class="card">
+      <h2>Danh mục chi tiêu</h2>
+      <p class="text-small text-soft mt-1">
+        Danh mục dùng chung cho mọi người dùng. Danh mục đang có dữ liệu chỉ nên <b>lưu trữ</b>, không xoá hẳn.
+      </p>
+    </section>
+
+    <section class="card mt-5">
+      <div id="catBox"></div>
+    </section>
+  </main>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang admin-expense-category-management — Quản trị viên lưu trữ / khôi phục danh mục chi. */
+
+/* ---------- 1. Danh sách danh mục ---------- */
+async function loadCategories() {
+  const box = SW.$("#catBox");
+
+  await SW.loadInto(box, async () => {
+    const categories = await API.list("categories");
+    const transactions = await API.list("transactions", (t) => t.status === "active");
+
+    return SW.table(
+      "<th>Danh mục</th><th>Số giao dịch đang dùng</th><th>Trạng thái</th><th></th>",
+      categories.map((category) => {
+        const used = transactions.filter((t) => t.categoryId === category.id).length;
+        const archived = category.status === "archived";
+        return `
+          <tr${archived ? ' class="is-archived"' : ""}>
+            <td><b>${category.icon} ${SW.escapeHtml(category.name)}</b></td>
+            <td>${used} giao dịch</td>
+            <td>${SW.statusBadge(category.status)}</td>
+            <td class="nowrap">
+              ${archived
+                ? `<button class="btn secondary sm" data-restore="${category.id}">↩ Khôi phục</button>`
+                : `<button class="btn danger sm" data-archive="${category.id}" data-used="${used}">Lưu trữ</button>`}
+            </td>
+          </tr>`;
+      }));
+  }, SW.skeleton(2, 44));
+
+  bindCategoryButtons();
+}
+
+function bindCategoryButtons() {
+  const box = SW.$("#catBox");
+
+  SW.onClick("[data-archive]", (button) => {
+    const used = Number(button.dataset.used);
+    SW.confirmAndRun("Lưu trữ danh mục?",
+      used > 0
+        ? `Danh mục đang có ${used} giao dịch. Dữ liệu cũ vẫn giữ nguyên, chỉ ẩn khi tạo giao dịch mới.`
+        : "Danh mục sẽ ẩn khỏi form tạo giao dịch.",
+      () => API.archive("categories", button.dataset.archive),
+      "Đã lưu trữ danh mục.", loadCategories);
+  }, box);
+
+  SW.onClick("[data-restore]", (button) =>
+    SW.runAction(() => API.restore("categories", button.dataset.restore),
+      "Đã khôi phục danh mục.", loadCategories), box);
+}
+
+/* ---------- 2. Khởi động ---------- */
+loadCategories();
+</script>
+</body>
+</html>

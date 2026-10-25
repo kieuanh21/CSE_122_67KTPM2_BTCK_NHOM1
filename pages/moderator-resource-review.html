@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Duyệt tài nguyên · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="moderator" data-page="moderator-resource-review.html" data-title="Duyệt tài nguyên">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <section class="card">
+      <h2>Hàng chờ kiểm duyệt</h2>
+      <p class="text-small text-soft mt-1">
+        Kiểm tra nội dung huấn luyện viên gửi. <b>Duyệt</b> để xuất bản, hoặc <b>Từ chối</b> kèm lý do bắt buộc.
+      </p>
+    </section>
+
+    <section class="card mt-5">
+      <div id="reviewBox"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== Modal từ chối (lý do bắt buộc) ===== -->
+<div class="modal-backdrop" id="rejectModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rejectTitle">
+    <h3 id="rejectTitle">Từ chối tài nguyên</h3>
+    <form id="rejectForm" novalidate>
+      <p class="text-small text-soft mb-3">
+        Lý do sẽ hiển thị cho huấn luyện viên để họ sửa và gửi lại.
+      </p>
+      <div class="field">
+        <label class="label" for="rejectReason">Lý do từ chối *</label>
+        <textarea class="input" id="rejectReason" rows="3" placeholder="VD: Nội dung chưa dẫn nguồn số liệu, cần bổ sung…"></textarea>
+        <p class="field-error" id="errReason" hidden>Vui lòng nhập lý do (tối thiểu 10 ký tự).</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn danger" type="submit">Từ chối</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang moderator-resource-review — Kiểm duyệt viên duyệt hoặc từ chối tài nguyên. */
+
+let rejectingId = null; // id tài nguyên đang bị từ chối
+
+const TAGS = {
+  "ngan-sach": "Ngân sách",
+  "tiet-kiem": "Tiết kiệm",
+  "thoi-quen": "Thói quen",
+};
+
+/* ---------- 1. Hàng chờ duyệt ---------- */
+async function loadQueue() {
+  const box = SW.$("#reviewBox");
+
+  await SW.loadInto(box, async () => {
+    const items = (await API.list("resources", (r) => r.status === "pending"))
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)); // gửi trước duyệt trước
+
+    if (items.length === 0) {
+      return SW.empty("🎉", "Không có tài nguyên nào chờ duyệt.<br>Bạn đã xử lý hết hàng chờ!");
+    }
+
+    return items.map((resource) => `
+      <div class="card mb-3">
+        <div class="row-between">
+          <div class="grow">
+            <b>${SW.escapeHtml(resource.title)}</b>
+            <span class="badge purple">${SW.escapeHtml(TAGS[resource.tag] || "Chung")}</span>
+            <p class="mt-2">${SW.escapeHtml(resource.content)}</p>
+            <p class="text-small text-muted mt-2">
+              👤 ${SW.escapeHtml(API.userName(resource.authorId).name)} · gửi ${SW.fmtDate(resource.updatedAt)}
+            </p>
+          </div>
+          <div class="actions">
+            <button class="btn sm" data-ok="${resource.id}">✓ Duyệt</button>
+            <button class="btn danger sm" data-no="${resource.id}">✕ Từ chối</button>
+          </div>
+        </div>
+      </div>`).join("");
+  }, SW.skeleton(2, 80));
+
+  bindReviewButtons();
+}
+
+function bindReviewButtons() {
+  const box = SW.$("#reviewBox");
+
+  SW.onClick("[data-ok]", (button) =>
+    SW.runAction(() => API.update("resources", button.dataset.ok, { status: "published", rejectReason: "" }),
+      "Đã duyệt và xuất bản tài nguyên.", loadQueue), box);
+
+  SW.onClick("[data-no]", (button) => {
+    rejectingId = button.dataset.no;
+    SW.$("#rejectReason").value = "";
+    SW.clearErrors("#rejectForm");
+    SW.openModal("rejectModal");
+  }, box);
+}
+
+/* ---------- 2. Gửi lý do từ chối ---------- */
+SW.$("#rejectForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  SW.clearErrors("#rejectForm");
+
+  const reason = SW.$("#rejectReason").value.trim();
+  if (reason.length < 10) {
+    SW.markInvalid("#rejectReason", "#errReason");
+    return;
+  }
+
+  try {
+    await API.update("resources", rejectingId, { status: "rejected", rejectReason: reason });
+    SW.toast("Đã từ chối và gửi lý do cho huấn luyện viên.", "info");
+    SW.closeModal("rejectModal");
+    loadQueue();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  }
+});
+
+/* ---------- 3. Khởi động ---------- */
+loadQueue();
+</script>
+</body>
+</html>

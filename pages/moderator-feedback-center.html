@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trung tâm phản hồi · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="moderator" data-page="moderator-feedback-center.html" data-title="Trung tâm phản hồi">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <section class="card toolbar">
+      <div class="field grow">
+        <label class="label" for="fStatus">Lọc theo trạng thái</label>
+        <select class="input" id="fStatus">
+          <option value="">Tất cả</option>
+          <option value="new">Mới</option>
+          <option value="processing">Đang xử lý</option>
+          <option value="resolved">Đã xử lý</option>
+          <option value="archived">Đã lưu trữ</option>
+        </select>
+      </div>
+      <button class="btn primary" id="addBtn">＋ Tạo phiếu phản hồi</button>
+    </section>
+
+    <section class="card mt-5">
+      <div id="fbBox"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== Modal tạo phản hồi ===== -->
+<div class="modal-backdrop" id="fModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="fModalTitle">
+    <h3 id="fModalTitle">Tạo phiếu phản hồi</h3>
+    <form id="fForm" novalidate>
+      <div class="field">
+        <label class="label" for="fTitle">Tiêu đề *</label>
+        <input class="input" id="fTitle" type="text" placeholder="VD: Người dùng báo lỗi AI gợi ý sai">
+        <p class="field-error" id="errTitle" hidden>Vui lòng nhập tiêu đề.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="fBody">Nội dung *</label>
+        <textarea class="input" id="fBody" rows="3" placeholder="Mô tả chi tiết…"></textarea>
+        <p class="field-error" id="errBody" hidden>Vui lòng nhập nội dung (tối thiểu 10 ký tự).</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn primary" type="submit">Tạo</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== Modal phản hồi người dùng ===== -->
+<div class="modal-backdrop" id="rModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rModalTitle">
+    <h3 id="rModalTitle">Xử lý phản hồi</h3>
+    <p id="rInfo" class="text-small text-soft mb-3"></p>
+    <form id="rForm" novalidate>
+      <div class="field">
+        <label class="label" for="rReply">Nội dung trả lời *</label>
+        <textarea class="input" id="rReply" rows="3" placeholder="Phản hồi gửi tới người dùng…"></textarea>
+        <p class="field-error" id="errReply" hidden>Vui lòng nhập nội dung trả lời.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn primary" type="submit">Gửi &amp; đánh dấu đã xử lý</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang moderator-feedback-center — Kiểm duyệt viên xử lý phản hồi:
+   Mới → Đang xử lý → Đã xử lý. */
+
+let replyingId = null; // id phản hồi đang trả lời
+
+/* ---------- 1. Danh sách phản hồi ---------- */
+async function loadFeedbacks() {
+  const box = SW.$("#fbBox");
+  const order = { new: 0, processing: 1, resolved: 2, archived: 3 }; // việc mới lên trước
+
+  await SW.loadInto(box, async () => {
+    const status = SW.$("#fStatus").value;
+    const items = (await API.list("feedbacks", (f) => !status || f.status === status))
+      .sort((a, b) => order[a.status] - order[b.status]);
+
+    if (items.length === 0) return SW.empty("💬", "Không có phản hồi nào ở trạng thái này.");
+
+    return items.map((feedback) => `
+      <div class="card mb-3 ${feedback.status === "archived" ? "is-archived" : ""}">
+        <div class="row-between">
+          <div class="grow">
+            <b>${SW.escapeHtml(feedback.title)}</b> ${SW.statusBadge(feedback.status)}
+            <p class="mt-2">${SW.escapeHtml(feedback.body)}</p>
+            ${feedback.reply
+              ? `<p class="text-small text-success mt-2">↩ ${SW.escapeHtml(feedback.reply)}</p>`
+              : ""}
+            <p class="text-small text-muted mt-2">
+              👤 ${SW.escapeHtml(API.userName(feedback.userId).name)} · ${SW.fmtDate(feedback.createdAt)}
+            </p>
+          </div>
+          <div class="vertical-actions">
+            ${feedback.status === "new" ? `<button class="btn secondary sm" data-start="${feedback.id}">👆 Bắt đầu xử lý</button>` : ""}
+            ${feedback.status === "processing" ? `<button class="btn sm" data-reply="${feedback.id}">↩ Phản hồi</button>` : ""}
+            ${feedback.status !== "archived" ? `<button class="btn ghost sm" data-archive="${feedback.id}">Lưu trữ</button>` : ""}
+          </div>
+        </div>
+      </div>`).join("");
+  }, SW.skeleton(2, 64));
+
+  bindFeedbackButtons();
+}
+
+function bindFeedbackButtons() {
+  const box = SW.$("#fbBox");
+
+  SW.onClick("[data-start]", (button) =>
+    SW.runAction(() => API.update("feedbacks", button.dataset.start, { status: "processing" }),
+      "Đã chuyển sang đang xử lý.", loadFeedbacks), box);
+
+  SW.onClick("[data-reply]", async (button) => {
+    replyingId = button.dataset.reply;
+    try {
+      const feedback = await API.get("feedbacks", replyingId);
+      SW.$("#rReply").value = "";
+      SW.clearErrors("#rForm");
+      SW.$("#rInfo").textContent = feedback.title + ": " + feedback.body;
+      SW.openModal("rModal");
+    } catch (err) {
+      SW.toast(err.message, "error");
+    }
+  }, box);
+
+  SW.onClick("[data-archive]", (button) =>
+    SW.confirmAndRun("Lưu trữ phản hồi này?", "Phản hồi sẽ ẩn khỏi danh sách chính.",
+      () => API.archive("feedbacks", button.dataset.archive),
+      "Đã lưu trữ.", loadFeedbacks), box);
+}
+
+/* ---------- 2. Tạo phiếu phản hồi ---------- */
+SW.$("#addBtn").addEventListener("click", () => {
+  SW.$("#fForm").reset();
+  SW.clearErrors("#fForm");
+  SW.openModal("fModal");
+});
+
+SW.$("#fForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  SW.clearErrors("#fForm");
+
+  const title = SW.$("#fTitle").value.trim();
+  const body = SW.$("#fBody").value.trim();
+  let ok = true;
+  if (!title) { SW.markInvalid("#fTitle", "#errTitle"); ok = false; }
+  if (body.length < 10) { SW.markInvalid("#fBody", "#errBody"); ok = false; }
+  if (!ok) return;
+
+  try {
+    await API.create("feedbacks", {
+      userId: "u1",
+      title,
+      body,
+      status: "new",
+      reply: "",
+      createdAt: new Date().toISOString().slice(0, 10),
+    });
+    SW.toast("Đã tạo phiếu phản hồi.", "success");
+    SW.closeModal("fModal");
+    loadFeedbacks();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  }
+});
+
+/* ---------- 3. Gửi trả lời ---------- */
+SW.$("#rForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  SW.clearErrors("#rForm");
+
+  const reply = SW.$("#rReply").value.trim();
+  if (reply.length < 5) {
+    SW.markInvalid("#rReply", "#errReply");
+    return;
+  }
+
+  try {
+    await API.update("feedbacks", replyingId, { status: "resolved", reply });
+    SW.toast("Đã phản hồi và hoàn tất.", "success");
+    SW.closeModal("rModal");
+    loadFeedbacks();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  }
+});
+
+/* ---------- 4. Sự kiện lọc + khởi động ---------- */
+SW.$("#fStatus").addEventListener("change", loadFeedbacks);
+loadFeedbacks();
+</script>
+</body>
+</html>

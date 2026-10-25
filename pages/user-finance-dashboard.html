@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tài chính của tôi · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="user" data-page="user-finance-dashboard.html" data-title="Tài chính của tôi">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <!-- ===== KPI tổng quan ===== -->
+    <section class="kpi-grid" id="kpiBox" aria-label="Tổng quan tháng này">
+      <!-- JS sẽ vẽ skeleton rồi thay bằng số liệu -->
+    </section>
+
+    <div class="grid-2">
+      <!-- ===== Biểu đồ chi tiêu theo danh mục ===== -->
+      <section class="card" aria-labelledby="chartTitle">
+        <h2 id="chartTitle" class="mb-4">Chi tiêu theo danh mục (tháng này)</h2>
+        <div id="chartBox" class="barchart"></div>
+      </section>
+
+      <!-- ===== AI-2: Spending Pattern Insight ===== -->
+      <section class="ai-panel" aria-labelledby="aiTitle">
+        <div class="ai-head" id="aiTitle">🤖 AI phân tích pattern chi tiêu</div>
+
+        <p class="text-small text-soft">
+          AI so sánh chi tiêu tháng này với tháng trước và gợi ý hành động.
+        </p>
+        <button class="btn primary mt-3" id="aiRun">✨ Phân tích chi tiêu</button>
+
+        <div class="ai-thinking mt-3" id="aiThinking" hidden>
+          <div class="skeleton skl" style="width: 90%"></div>
+          <div class="skeleton skl" style="width: 75%"></div>
+          <div class="skeleton skl" style="width: 60%"></div>
+          <p class="text-small text-muted">AI đang xử lý…</p>
+        </div>
+
+        <div class="ai-fail" id="aiFail" hidden></div>
+
+        <div class="ai-result mt-3" id="aiResult">
+          <ul id="aiList" class="ai-list"></ul>
+          <div class="ai-why" id="aiWhy"></div>
+          <div class="ai-actions">
+            <button class="btn sm" id="aiSave">💾 Lưu nhận định</button>
+            <button class="btn ghost sm" id="aiRerun">🔄 Tạo lại</button>
+            <button class="btn ghost sm" id="aiClose">Đóng</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== Giao dịch gần đây ===== -->
+    <section class="card mt-5" aria-labelledby="recentTitle">
+      <div class="row-between mb-4">
+        <h2 id="recentTitle">Giao dịch gần đây</h2>
+        <a class="btn ghost sm" href="user-transaction-management.html">Xem tất cả →</a>
+      </div>
+      <div id="recentBox"></div>
+    </section>
+  </main>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang user-finance-dashboard — tổng quan tài chính: KPI, biểu đồ danh mục,
+   giao dịch gần đây và AI-2 phân tích thói quen chi tiêu. */
+
+const MONTH = "2026-10";
+const USER_ID = SW.currentUserId("user", "u1");
+
+/* ---------- 1. Bốn thẻ KPI ---------- */
+async function loadKpi() {
+  const box = SW.$("#kpiBox");
+
+  await SW.loadInto(box, async () => {
+    const transactions = await API.list("transactions",
+      (t) => t.userId === USER_ID && t.status === "active" && t.date.slice(0, 7) === MONTH);
+    const goals = await API.list("goals", (g) => g.userId === USER_ID && g.status !== "cancelled");
+    const budgets = await API.list("budgets",
+      (b) => b.userId === USER_ID && b.month === MONTH && b.status === "approved");
+
+    let spent = 0;
+    let income = 0;
+    let saved = 0;
+    let budgetTotal = 0;
+    let spentInBudget = 0;
+
+    for (const t of transactions) {
+      if (t.type === "expense") spent += t.amount;
+      else income += t.amount;
+    }
+    for (const goal of goals) saved += goal.saved;
+    for (const budget of budgets) budgetTotal += budget.amount;
+    for (const t of transactions) {
+      if (t.type === "expense" && budgets.some((b) => b.categoryId === t.categoryId)) {
+        spentInBudget += t.amount;
+      }
+    }
+
+    const budgetLeft = budgets.length > 0 ? budgetTotal - spentInBudget : null;
+
+    return kpi(`Đã chi (tháng ${MONTH.slice(5)})`, SW.fmtVND(spent), "up") +
+      kpi("Thu nhập", SW.fmtVND(income), "down") +
+      kpi("Tổng đã tiết kiệm", SW.fmtVND(saved), "down") +
+      kpi("Ngân sách còn lại", budgetLeft === null ? "Chưa có" : SW.fmtVND(budgetLeft),
+        budgetLeft !== null && budgetLeft < 0 ? "up" : "down");
+  }, SW.skeleton(4, 90));
+}
+
+function kpi(label, value, delta) {
+  return `
+    <div class="kpi">
+      <span class="kpi-label">${label}</span>
+      <strong class="kpi-value">${value}</strong>
+      <span class="kpi-delta ${delta}">tháng này</span>
+    </div>`;
+}
+
+/* ---------- 2. Biểu đồ cột theo danh mục ---------- */
+async function loadChart() {
+  const box = SW.$("#chartBox");
+
+  await SW.loadInto(box, async () => {
+    const transactions = await API.list("transactions",
+      (t) => t.userId === USER_ID && t.status === "active" &&
+             t.type === "expense" && t.date.slice(0, 7) === MONTH);
+
+    if (transactions.length === 0) return SW.empty("🪙", "Chưa có khoản chi nào trong tháng này.");
+
+    const byCategory = {};
+    for (const t of transactions) {
+      byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + t.amount;
+    }
+
+    const rows = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
+    const max = rows[0][1];
+
+    return rows.map(([categoryId, amount]) => {
+      const category = API.categoryName(categoryId);
+      return `
+        <div class="bar-row">
+          <span>${category.icon} ${category.name}</span>
+          <span class="bar-track">
+            <span class="bar-fill" style="width:${Math.round(amount / max * 100)}%"></span>
+          </span>
+          <span class="bar-val">${SW.fmtVND(amount)}</span>
+        </div>`;
+    }).join("");
+  }, SW.skeleton(5, 16));
+}
+
+/* ---------- 3. AI-2: phân tích thói quen chi tiêu ---------- */
+const aiButton = SW.$("#aiRun");
+const aiThinking = SW.$("#aiThinking");
+const aiResult = SW.$("#aiResult");
+const aiFail = SW.$("#aiFail");
+
+function showAiError(message) {
+  aiFail.hidden = false;
+  aiFail.innerHTML = `
+    <div class="actions">
+      <span>⚠️ ${SW.escapeHtml(message)}</span>
+      <button class="btn sm" id="aiRetry">Thử lại</button>
+    </div>`;
+  SW.$("#aiRetry").addEventListener("click", runInsight);
+}
+
+async function runInsight() {
+  aiButton.disabled = true;
+  aiResult.classList.remove("show");
+  aiFail.hidden = true;
+  aiThinking.hidden = false;
+
+  try {
+    const expenses = await API.list("transactions",
+      (t) => t.userId === USER_ID && t.status === "active" &&
+             t.type === "expense" && t.date.slice(0, 7) === MONTH);
+
+    const res = await AI.insight(expenses);
+    if (!res.ok) {
+      showAiError(res.reason);
+      return;
+    }
+
+    aiResult.classList.add("show");
+    SW.$("#aiList").innerHTML = res.result.map((item) => `
+      <li>${SW.escapeHtml(item.text)}
+        <em class="ai-action">→ ${SW.escapeHtml(item.action)}</em>
+      </li>`).join("");
+    SW.$("#aiWhy").innerHTML = "<b>Vì sao có kết quả này?</b> " + SW.escapeHtml(res.reason);
+    SW.toast("AI đã phân tích xong.", "success");
+  } catch (err) {
+    showAiError(err.message);
+  } finally {
+    aiThinking.hidden = true;
+    aiButton.disabled = false;
+  }
+}
+
+aiButton.addEventListener("click", runInsight);
+SW.$("#aiRerun").addEventListener("click", runInsight);
+SW.$("#aiClose").addEventListener("click", () => aiResult.classList.remove("show"));
+SW.$("#aiSave").addEventListener("click", () => {
+  if (!aiResult.classList.contains("show")) return;
+  SW.toast("Đã lưu nhận định vào hồ sơ (mô phỏng).", "success");
+});
+
+/* ---------- 4. Giao dịch gần đây ---------- */
+async function loadRecent() {
+  const box = SW.$("#recentBox");
+
+  await SW.loadInto(box, async () => {
+    const transactions = (await API.list("transactions",
+      (t) => t.userId === USER_ID && t.status === "active"))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 5);
+
+    if (transactions.length === 0) {
+      return SW.empty("🧾", "Chưa có giao dịch. Hãy thêm giao dịch đầu tiên!");
+    }
+
+    return SW.table(
+      '<th>Tên</th><th>Danh mục</th><th>Ngày</th><th class="text-right">Số tiền</th>',
+      transactions.map((t) => {
+        const category = API.categoryName(t.categoryId);
+        return `
+          <tr>
+            <td>${SW.escapeHtml(t.name)}</td>
+            <td>${category.icon} ${category.name}</td>
+            <td>${SW.fmtDate(t.date)}</td>
+            <td class="text-right ${t.type === "expense" ? "t-neg" : "t-pos"}">
+              ${t.type === "expense" ? "−" : "+"}${SW.fmtVND(t.amount)}
+            </td>
+          </tr>`;
+      }));
+  }, SW.skeleton(3, 44));
+}
+
+/* ---------- 5. Khởi động ---------- */
+loadKpi();
+loadChart();
+loadRecent();
+</script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpendWise — Quản lý ngân sách &amp; thói quen chi tiêu</title>
+<script src="js/theme.js"></script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar landing-header">
+    <div class="row">
+      <span class="landing-logo" aria-hidden="true">💰</span>
+      <div>
+        <h1 class="landing-title">SpendWise</h1>
+        <p class="page-sub">Quản lý ngân sách &amp; thói quen chi tiêu</p>
+      </div>
+    </div>
+    <div class="row">
+      <button type="button" class="btn ghost sm theme-toggle" data-theme-toggle title="Đổi giao diện sáng/tối">🌙 Tối</button>
+      <a class="btn primary" href="pages/login.html">Đăng nhập →</a>
+    </div>
+  </header>
+
+  <main class="landing-main">
+    <section class="card hero">
+      <h2 class="hero-title">
+        Hiểu tiền của bạn đi đâu, đặt mục tiêu và để AI đồng hành cùng thói quen chi tiêu.
+      </h2>
+      <p class="text-soft mt-3">
+        Ghi giao dịch · Ngân sách theo danh mục · Mục tiêu tiết kiệm · AI phân tích pattern · Cộng đồng huấn luyện viên.
+      </p>
+      <div class="actions justify-center mt-4">
+        <a class="btn primary" href="pages/login.html">Bắt đầu trải nghiệm</a>
+        <a class="btn secondary" href="#roles">Xem 4 vai trò</a>
+      </div>
+    </section>
+
+    <h2 id="roles" class="roles-title">Chọn vai trò để khám phá luồng nghiệp vụ</h2>
+    <div class="role-grid">
+      <a class="card role-card user" href="pages/user-finance-dashboard.html">
+        <div class="role-icon" aria-hidden="true">🧑‍💻</div>
+        <h3>Người dùng</h3>
+        <p class="text-small text-soft">
+          Ghi giao dịch, tạo ngân sách, đặt mục tiêu tiết kiệm, dùng AI phân tích chi tiêu.
+        </p>
+      </a>
+      <a class="card role-card coach" href="pages/coach-client-list.html">
+        <div class="role-icon" aria-hidden="true">🧑‍🏫</div>
+        <h3>Huấn luyện viên</h3>
+        <p class="text-small text-soft">
+          Xem tổng quan học viên, duyệt ngân sách kèm tư vấn, quản lý tài nguyên giáo dục.
+        </p>
+      </a>
+      <a class="card role-card moderator" href="pages/moderator-resource-review.html">
+        <div class="role-icon" aria-hidden="true">🛡️</div>
+        <h3>Kiểm duyệt viên</h3>
+        <p class="text-small text-soft">
+          Duyệt tài nguyên, quản lý mẫu AI (kèm chạy thử), xử lý phản hồi người dùng.
+        </p>
+      </a>
+      <a class="card role-card admin" href="pages/admin-system-dashboard.html">
+        <div class="role-icon" aria-hidden="true">🛠️</div>
+        <h3>Quản trị viên</h3>
+        <p class="text-small text-soft">
+          Quản lý danh mục chi, tài khoản (khoá/mở), bảng điều khiển hệ thống và thông báo.
+        </p>
+      </a>
+    </div>
+
+    <section class="card mt-5">
+      <h3>🤖 Ba tính năng AI (mô phỏng phía Frontend)</h3>
+      <ul class="ai-list text-soft">
+        <li><b>AI-1 Gợi ý danh mục</b> — nhập tên giao dịch, AI đề xuất danh mục kèm độ tin cậy và lý do.</li>
+        <li><b>AI-2 Phân tích pattern</b> — so sánh chi tiêu tháng này với tháng trước, gợi ý hành động.</li>
+        <li><b>AI-3 Goal Coach</b> — lập kế hoạch tiết kiệm theo tuần, cảnh báo khi mục tiêu chưa khả thi.</li>
+      </ul>
+      <p class="text-small text-muted mt-2">
+        Mỗi tính năng đều có luồng đầy đủ: Nhập → Đang xử lý → Kết quả → Vì sao? → Chấp nhận/Từ chối/Tạo lại,
+        và trạng thái thất bại khi thiếu dữ liệu hoặc lỗi kết nối (nút "⚠️ Mô phỏng lỗi" trên mọi trang).
+      </p>
+    </section>
+  </main>
+</body>
+</html>

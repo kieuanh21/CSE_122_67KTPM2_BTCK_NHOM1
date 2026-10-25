@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quản lý giao dịch · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="user" data-page="user-transaction-management.html" data-title="Quản lý giao dịch">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <!-- ===== Thanh công cụ: tìm kiếm + lọc ===== -->
+    <section class="card toolbar">
+      <div class="field grow">
+        <label class="label" for="q">Tìm kiếm</label>
+        <input class="input" id="q" type="search" placeholder="Tên giao dịch…">
+      </div>
+      <div class="field">
+        <label class="label" for="fCat">Danh mục</label>
+        <select class="input" id="fCat"><option value="">Tất cả</option></select>
+      </div>
+      <div class="field">
+        <label class="label" for="fType">Loại</label>
+        <select class="input" id="fType">
+          <option value="">Tất cả</option>
+          <option value="expense">Chi</option>
+          <option value="income">Thu</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="fMonth">Tháng</label>
+        <select class="input" id="fMonth">
+          <option value="">Tất cả</option>
+          <option value="2026-10">10/2026</option>
+          <option value="2026-09">09/2026</option>
+        </select>
+      </div>
+      <button class="btn primary" id="addBtn">＋ Thêm giao dịch</button>
+    </section>
+
+    <!-- ===== Bảng giao dịch ===== -->
+    <section class="card mt-5">
+      <div class="row-between mb-3">
+        <h2>Danh sách giao dịch</h2>
+        <span id="countInfo" class="text-small text-muted"></span>
+      </div>
+      <div id="tableBox"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== Modal thêm / sửa giao dịch (có AI-1 gợi ý danh mục) ===== -->
+<div class="modal-backdrop" id="txModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="txModalTitle">
+    <h3 id="txModalTitle">Thêm giao dịch</h3>
+    <form id="txForm" novalidate>
+      <div class="field">
+        <label class="label" for="txName">Tên giao dịch *</label>
+        <input class="input" id="txName" type="text" placeholder="VD: Ăn trưa căng tin">
+        <p class="field-error" id="errName" hidden>Vui lòng nhập tên giao dịch (tối thiểu 2 ký tự).</p>
+      </div>
+      <div class="field">
+        <label class="label" for="txAmount">Số tiền (₫) *</label>
+        <input class="input" id="txAmount" type="number" min="1000" step="1000" placeholder="50000">
+        <p class="field-error" id="errAmount" hidden>Số tiền phải lớn hơn 0.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="txType">Loại *</label>
+        <select class="input" id="txType">
+          <option value="expense">Chi</option>
+          <option value="income">Thu</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="txCat">Danh mục *</label>
+        <select class="input" id="txCat"></select>
+        <p class="field-error" id="errCat" hidden>Vui lòng chọn danh mục.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="txDate">Ngày *</label>
+        <input class="input" id="txDate" type="date">
+        <p class="field-error" id="errDate" hidden>Vui lòng chọn ngày.</p>
+      </div>
+
+      <!-- AI-1: Expense Categorizer -->
+      <div class="ai-panel mt-4">
+        <div class="ai-head">🤖 AI gợi ý danh mục</div>
+        <button class="btn sm" type="button" id="aiSuggest">✨ Gợi ý từ tên giao dịch</button>
+        <div id="aiThinking" hidden class="mt-3">
+          <div class="skeleton skl" style="width:70%"></div>
+          <div class="skeleton skl" style="width:45%"></div>
+        </div>
+        <div class="ai-fail mt-3" id="aiFail" hidden></div>
+        <div class="ai-result mt-3" id="aiResult">
+          <p id="aiText" class="fw-bold"></p>
+          <div class="ai-why" id="aiWhy"></div>
+          <div class="ai-actions">
+            <button class="btn sm" type="button" id="aiAccept">✓ Chấp nhận</button>
+            <button class="btn ghost sm" type="button" id="aiReject">✕ Từ chối</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn primary" type="submit" id="txSave">Lưu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → AI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+
+<script>
+/* Trang giao dịch: tìm/lọc, thêm–sửa–lưu trữ giao dịch và AI-1 gợi ý danh mục kèm lý do. */
+const USER_ID = SW.currentUserId("user", "u1");
+let categories = [];  // danh mục đang dùng, nạp 1 lần khi mở trang
+let editingId = null; // null = thêm mới
+let aiPick = null;    // danh mục AI đang đề xuất
+
+/* ---------- 1. Nạp danh mục vào bộ lọc + ô chọn ---------- */
+async function loadCategories() {
+  categories = await API.list("categories", (c) => c.status === "active");
+  const options = categories.map((c) => '<option value="' + c.id + '">' + c.icon + " " + c.name + "</option>").join("");
+  SW.$("#fCat").innerHTML = '<option value="">Tất cả</option>' + options;
+  SW.$("#txCat").innerHTML = '<option value="">— chọn danh mục —</option>' + options;
+}
+
+/* ---------- 2. Bảng + bộ lọc ---------- */
+function currentFilter() {
+  const keyword = SW.$("#q").value.trim().toLowerCase();
+  const categoryId = SW.$("#fCat").value;
+  const type = SW.$("#fType").value;
+  const month = SW.$("#fMonth").value;
+
+  return (t) =>
+    t.userId === USER_ID && t.status === "active" &&
+    (!keyword || t.name.toLowerCase().includes(keyword)) &&
+    (!categoryId || t.categoryId === categoryId) &&
+    (!type || t.type === type) &&
+    (!month || t.date.slice(0, 7) === month);
+}
+
+async function loadTable() {
+  const box = SW.$("#tableBox");
+  await SW.loadInto(box, async () => {
+    const transactions = (await API.list("transactions", currentFilter()))
+      .sort((a, b) => b.date.localeCompare(a.date));
+    SW.$("#countInfo").textContent = transactions.length + " giao dịch";
+    if (!transactions.length) {
+      return SW.empty("🔍", "Không có giao dịch phù hợp bộ lọc.<br>Hãy thử đổi từ khoá hoặc thêm giao dịch mới.");
+    }
+    return SW.table(
+      "<th>Tên</th><th>Danh mục</th><th>Loại</th><th>Ngày</th>" +
+        '<th class="text-right">Số tiền</th><th></th>',
+      transactions.map((t) => {
+        const category = API.categoryName(t.categoryId);
+        const isExpense = t.type === "expense";
+        return `
+          <tr>
+            <td>${SW.escapeHtml(t.name)}</td>
+            <td>${category.icon} ${category.name}</td>
+            <td>${SW.badge(isExpense ? "Chi" : "Thu", isExpense ? "danger" : "success")}</td>
+            <td>${SW.fmtDate(t.date)}</td>
+            <td class="text-right ${isExpense ? "t-neg" : "t-pos"}">
+              ${isExpense ? "−" : "+"}${SW.fmtVND(t.amount)}
+            </td>
+            <td class="nowrap">
+              <button class="btn ghost sm" data-edit="${t.id}">Sửa</button>
+              <button class="btn danger sm" data-archive="${t.id}">Xoá</button>
+            </td>
+          </tr>`;
+      }));
+  }, SW.skeleton(3, 44));
+
+  bindTableButtons();
+}
+
+function bindTableButtons() {
+  const box = SW.$("#tableBox");
+
+  SW.onClick("[data-edit]", (button) => openEdit(button.dataset.edit), box);
+
+  SW.onClick("[data-archive]", (button) =>
+    SW.confirmAndRun("Xoá giao dịch?",
+      "Giao dịch sẽ được lưu trữ (không xoá vĩnh viễn để giữ lịch sử tài chính).",
+      () => API.archive("transactions", button.dataset.archive),
+      "Đã xoá (lưu trữ) giao dịch.", loadTable), box);
+}
+
+SW.$("#q").addEventListener("input", SW.debounce(loadTable, 250));
+SW.$("#fCat").addEventListener("change", loadTable);
+SW.$("#fType").addEventListener("change", loadTable);
+SW.$("#fMonth").addEventListener("change", loadTable);
+
+/* ---------- 3. Modal thêm / sửa ---------- */
+function openCreate() {
+  editingId = null;
+  SW.$("#txModalTitle").textContent = "Thêm giao dịch";
+  SW.$("#txForm").reset();
+  SW.clearErrors("#txForm");
+  resetAi();
+  SW.openModal("txModal");
+}
+
+async function openEdit(id) {
+  const transaction = await API.get("transactions", id);
+  editingId = id;
+  SW.$("#txModalTitle").textContent = "Sửa giao dịch";
+  SW.$("#txName").value = transaction.name;
+  SW.$("#txAmount").value = transaction.amount;
+  SW.$("#txType").value = transaction.type;
+  SW.$("#txCat").value = transaction.categoryId;
+  SW.$("#txDate").value = transaction.date;
+  SW.clearErrors("#txForm");
+  resetAi();
+  SW.openModal("txModal");
+}
+
+SW.$("#addBtn").addEventListener("click", openCreate);
+
+/* ---------- 4. Kiểm tra hợp lệ + lưu ---------- */
+SW.$("#txForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  SW.clearErrors("#txForm");
+
+  let valid = true;
+  if (SW.$("#txName").value.trim().length < 2) { SW.markInvalid("#txName", "#errName"); valid = false; }
+  if (!(Number(SW.$("#txAmount").value) > 0)) { SW.markInvalid("#txAmount", "#errAmount"); valid = false; }
+  if (!SW.$("#txCat").value) { SW.markInvalid("#txCat", "#errCat"); valid = false; }
+  if (!SW.$("#txDate").value) { SW.markInvalid("#txDate", "#errDate"); valid = false; }
+  if (!valid) return;
+
+  const data = {
+    userId: USER_ID,
+    name: SW.$("#txName").value.trim(),
+    amount: Number(SW.$("#txAmount").value),
+    type: SW.$("#txType").value,
+    categoryId: SW.$("#txCat").value,
+    date: SW.$("#txDate").value,
+    status: "active",
+  };
+
+  const saveButton = SW.$("#txSave");
+  saveButton.disabled = true;
+  try {
+    if (editingId) {
+      await API.update("transactions", editingId, data);
+      SW.toast("Đã cập nhật giao dịch.", "success");
+    } else {
+      await API.create("transactions", data);
+      SW.toast("Đã thêm giao dịch.", "success");
+    }
+    SW.closeModal("txModal");
+    loadTable();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  } finally {
+    saveButton.disabled = false;
+  }
+});
+
+/* ---------- 5. AI-1: gợi ý danh mục ---------- */
+function resetAi() {
+  aiPick = null;
+  SW.$("#aiResult").classList.remove("show");
+  SW.$("#aiFail").hidden = true;
+  SW.$("#aiThinking").hidden = true;
+}
+
+SW.$("#txName").addEventListener("change", resetAi);
+
+SW.$("#aiSuggest").addEventListener("click", async () => {
+  const name = SW.$("#txName").value.trim();
+  resetAi();
+  if (name.length < 2) {
+    SW.toast("Hãy nhập tên giao dịch trước khi dùng AI.", "info");
+    return;
+  }
+
+  const result = await SW.runAI("#aiThinking", "#aiFail", () => AI.categorize(name));
+  if (!result) return;
+
+  aiPick = result.result.categoryId;
+  const category = API.categoryName(aiPick);
+  SW.$("#aiText").textContent = "AI đề xuất: " + category.icon + " " + category.name +
+    " (độ tin cậy " + Math.round(result.result.confidence * 100) + "%)";
+  SW.$("#aiWhy").innerHTML = "<b>Vì sao?</b> " + SW.escapeHtml(result.reason);
+  SW.$("#aiResult").classList.add("show");
+});
+
+SW.$("#aiAccept").addEventListener("click", () => {
+  if (!aiPick) return;
+  SW.$("#txCat").value = aiPick;
+  SW.toast("Đã chọn danh mục theo AI.", "success");
+});
+
+SW.$("#aiReject").addEventListener("click", () => {
+  resetAi();
+  SW.toast("Đã từ chối gợi ý của AI — bạn tự chọn danh mục.", "info");
+});
+
+/* ---------- 6. Khởi động ---------- */
+(async function init() {
+  await loadCategories();
+  loadTable();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mục tiêu tiết kiệm · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="user" data-page="user-saving-goals.html" data-title="Mục tiêu tiết kiệm">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <section class="card row-between">
+      <div>
+        <h2>Mục tiêu của tôi</h2>
+        <p class="text-small text-soft mt-1">
+          Đặt mục tiêu, để AI lập kế hoạch tiết kiệm theo tuần giúp bạn.
+        </p>
+      </div>
+      <button class="btn primary" id="addBtn">＋ Tạo mục tiêu</button>
+    </section>
+
+    <!-- Danh sách mục tiêu (grid card) -->
+    <div id="goalBox" class="grid-cards mt-5"></div>
+  </main>
+</div>
+
+<!-- ===== Modal thêm / sửa mục tiêu (có AI-3 Goal Coach) ===== -->
+<div class="modal-backdrop" id="goalModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="goalModalTitle">
+    <h3 id="goalModalTitle">Tạo mục tiêu</h3>
+    <form id="goalForm" novalidate>
+      <div class="field">
+        <label class="label" for="gName">Tên mục tiêu *</label>
+        <input class="input" id="gName" type="text" placeholder="VD: Mua laptop học tập">
+        <p class="field-error" id="errName" hidden>Vui lòng nhập tên mục tiêu.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="gTarget">Số tiền mục tiêu (₫) *</label>
+        <input class="input" id="gTarget" type="number" min="100000" step="100000" placeholder="15000000">
+        <p class="field-error" id="errTarget" hidden>Mục tiêu tối thiểu 100.000₫.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="gSaved">Đã tiết kiệm (₫)</label>
+        <input class="input" id="gSaved" type="number" min="0" step="50000" value="0">
+        <p class="field-error" id="errSaved" hidden>Không được âm và không vượt mục tiêu.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="gDeadline">Hạn chót *</label>
+        <input class="input" id="gDeadline" type="date">
+        <p class="field-error" id="errDeadline" hidden>Hạn chót phải sau hôm nay.</p>
+      </div>
+
+      <!-- AI-3: Goal Coach -->
+      <div class="ai-panel mt-4">
+        <div class="ai-head">🤖 AI Goal Coach — lập kế hoạch tiết kiệm</div>
+        <div class="field mb-3">
+          <label class="label" for="gWeekly">Số tiền bạn có thể để dành mỗi tuần (₫)</label>
+          <input class="input" id="gWeekly" type="number" min="0" step="50000" placeholder="500000">
+        </div>
+        <button class="btn sm" type="button" id="aiPlan">✨ Lập kế hoạch với AI</button>
+        <div id="aiThinking" hidden class="mt-3">
+          <div class="skeleton skl" style="width:80%"></div>
+          <div class="skeleton skl" style="width:55%"></div>
+        </div>
+        <div class="ai-fail mt-3" id="aiFail" hidden></div>
+        <div class="ai-result mt-3" id="aiResult">
+          <p id="aiText" class="fw-bold"></p>
+          <ul id="aiList" class="ai-list mt-2"></ul>
+          <div class="ai-why" id="aiWhy"></div>
+          <div class="ai-actions">
+            <button class="btn sm" type="button" id="aiAccept">✓ Áp dụng kế hoạch</button>
+            <button class="btn ghost sm" type="button" id="aiReject">✕ Bỏ qua</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn primary" type="submit" id="gSave">Lưu mục tiêu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → AI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+
+<script>
+/* Trang mục tiêu: xem danh sách, thêm–sửa–hoàn thành–huỷ và AI-3 lập kế hoạch tiết kiệm theo tuần. */
+const USER_ID = SW.currentUserId("user", "u1");
+let editingId = null; // null = tạo mới
+let plan = null;      // kế hoạch AI đang đề xuất
+
+function goalBadge(status) {
+  if (status === "completed") return SW.badge("Hoàn thành", "success");
+  if (status === "cancelled") return SW.badge("Đã huỷ", "muted");
+  return SW.badge("Đang chạy", "info");
+}
+
+/* ---------- 1. Danh sách mục tiêu ---------- */
+async function loadGoals() {
+  const box = SW.$("#goalBox");
+  await SW.loadInto(box, async () => {
+    const goals = await API.list("goals", (g) => g.userId === USER_ID);
+    if (!goals.length) {
+      return SW.empty("🎯", "Chưa có mục tiêu nào.<br><b>Hãy tạo mục tiêu đầu tiên của bạn!</b>");
+    }
+
+    // Mục tiêu đang chạy hiện trước
+    goals.sort((a, b) => (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1));
+
+    return goals.map((g) => {
+      const percent = Math.min(100, Math.round((g.saved / g.target) * 100));
+      const daysLeft = Math.max(0, Math.ceil((new Date(g.deadline) - new Date()) / 86400000));
+      const actions = g.status === "active"
+        ? `
+          <button class="btn secondary sm" data-edit="${g.id}">Sửa</button>
+          <button class="btn sm" data-done="${g.id}" ${percent >= 100 ? "" : "disabled"}>✓ Hoàn thành</button>
+          <button class="btn ghost sm" data-cancel="${g.id}">Huỷ mục tiêu</button>`
+        : `<button class="btn ghost sm" data-restore="${g.id}">Khôi phục</button>`;
+
+      return `
+        <article class="card goal-card ${g.status === "cancelled" ? "is-cancelled" : ""}">
+          <div class="row-between">
+            <h3>${SW.escapeHtml(g.name)}</h3>
+            ${goalBadge(g.status)}
+          </div>
+          <p class="goal-meta">
+            ${SW.fmtVND(g.saved)} / ${SW.fmtVND(g.target)} · hạn ${SW.fmtDate(g.deadline)}
+            ${g.status === "active" ? `· còn ${daysLeft} ngày` : ""}
+          </p>
+          <div class="progress"><span style="width:${percent}%"></span></div>
+          <p class="goal-percent">${percent}% hoàn thành</p>
+          <div class="actions mt-3">${actions}</div>
+        </article>`;
+    }).join("");
+  }, SW.skeleton(3, 210));
+
+  bindGoalButtons();
+}
+
+function bindGoalButtons() {
+  const box = SW.$("#goalBox");
+
+  SW.onClick("[data-edit]", (button) => openEdit(button.dataset.edit), box);
+
+  SW.onClick("[data-done]", (button) =>
+    SW.confirmAndRun("Hoàn thành mục tiêu?", "Mục tiêu sẽ chuyển sang trạng thái Hoàn thành.",
+      () => API.update("goals", button.dataset.done, { status: "completed" }),
+      "Chúc mừng! Bạn đã hoàn thành mục tiêu 🎉", loadGoals), box);
+
+  SW.onClick("[data-cancel]", (button) =>
+    SW.confirmAndRun("Huỷ mục tiêu này?", "Bạn có thể khôi phục lại sau.",
+      () => API.update("goals", button.dataset.cancel, { status: "cancelled" }),
+      "Đã huỷ mục tiêu.", loadGoals), box);
+
+  SW.onClick("[data-restore]", (button) =>
+    SW.runAction(() => API.update("goals", button.dataset.restore, { status: "active" }),
+      "Đã khôi phục mục tiêu.", loadGoals), box);
+}
+
+/* ---------- 2. Modal thêm / sửa ---------- */
+SW.$("#addBtn").addEventListener("click", () => {
+  editingId = null;
+  SW.$("#goalModalTitle").textContent = "Tạo mục tiêu";
+  SW.$("#goalForm").reset();
+  SW.clearErrors("#goalForm");
+  resetAi();
+  SW.openModal("goalModal");
+});
+
+async function openEdit(id) {
+  const goal = await API.get("goals", id);
+  editingId = id;
+  SW.$("#goalModalTitle").textContent = "Sửa mục tiêu";
+  SW.$("#gName").value = goal.name;
+  SW.$("#gTarget").value = goal.target;
+  SW.$("#gSaved").value = goal.saved;
+  SW.$("#gDeadline").value = goal.deadline;
+  SW.clearErrors("#goalForm");
+  resetAi();
+  SW.openModal("goalModal");
+}
+
+/* ---------- 3. Kiểm tra hợp lệ + lưu ---------- */
+SW.$("#goalForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  SW.clearErrors("#goalForm");
+
+  const target = Number(SW.$("#gTarget").value);
+  const saved = Number(SW.$("#gSaved").value || 0);
+
+  let valid = true;
+  if (!SW.$("#gName").value.trim()) { SW.markInvalid("#gName", "#errName"); valid = false; }
+  if (!(target >= 100000)) { SW.markInvalid("#gTarget", "#errTarget"); valid = false; }
+  if (saved < 0 || saved > target) { SW.markInvalid("#gSaved", "#errSaved"); valid = false; }
+  if (!SW.$("#gDeadline").value || new Date(SW.$("#gDeadline").value) <= new Date()) {
+    SW.markInvalid("#gDeadline", "#errDeadline");
+    valid = false;
+  }
+  if (!valid) return;
+
+  const data = {
+    userId: USER_ID,
+    name: SW.$("#gName").value.trim(),
+    target,
+    saved,
+    deadline: SW.$("#gDeadline").value,
+    status: "active",
+    plan: "",
+  };
+
+  const saveButton = SW.$("#gSave");
+  saveButton.disabled = true;
+  try {
+    if (editingId) {
+      await API.update("goals", editingId, data);
+      SW.toast("Đã cập nhật mục tiêu.", "success");
+    } else {
+      await API.create("goals", data);
+      SW.toast("Đã tạo mục tiêu mới.", "success");
+    }
+    SW.closeModal("goalModal");
+    loadGoals();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  } finally {
+    saveButton.disabled = false;
+  }
+});
+
+/* ---------- 4. AI-3: Goal Coach ---------- */
+function resetAi() {
+  plan = null;
+  SW.$("#aiResult").classList.remove("show");
+  SW.$("#aiFail").hidden = true;
+  SW.$("#aiThinking").hidden = true;
+}
+
+SW.$("#aiPlan").addEventListener("click", async () => {
+  resetAi();
+
+  const goal = {
+    name: SW.$("#gName").value.trim(),
+    target: Number(SW.$("#gTarget").value),
+    saved: Number(SW.$("#gSaved").value || 0),
+    deadline: SW.$("#gDeadline").value,
+  };
+  if (!goal.name || !(goal.target >= 100000) || !goal.deadline) {
+    SW.toast("Hãy điền tên, số tiền và hạn chót trước khi dùng AI.", "info");
+    return;
+  }
+
+  const result = await SW.runAI("#aiThinking", "#aiFail",
+    () => AI.goalPlan(goal, Number(SW.$("#gWeekly").value) || null));
+  if (!result) return;
+
+  plan = result.result;
+  SW.$("#aiText").textContent = "Kế hoạch: để dành " + SW.fmtVND(plan.perWeek) + "/tuần trong " +
+    plan.weeks + " tuần.";
+  SW.$("#aiList").innerHTML = plan.milestones.map((milestone) =>
+    "<li>" + SW.escapeHtml(milestone) + "</li>").join("");
+  SW.$("#aiWhy").innerHTML = "<b>Vì sao?</b> " + SW.escapeHtml(result.reason) +
+    "<br>" + SW.escapeHtml(plan.tips);
+  SW.$("#aiResult").classList.add("show");
+});
+
+SW.$("#aiAccept").addEventListener("click", () => {
+  if (!plan) return;
+  SW.toast("Đã ghi nhận kế hoạch " + SW.fmtVND(plan.perWeek) + "/tuần (mô phỏng lưu vào hồ sơ).", "success");
+});
+
+SW.$("#aiReject").addEventListener("click", () => {
+  resetAi();
+  SW.toast("Đã bỏ qua kế hoạch của AI.", "info");
+});
+
+/* ---------- 5. Khởi động ---------- */
+loadGoals();
+</script>
+</body>
+</html>

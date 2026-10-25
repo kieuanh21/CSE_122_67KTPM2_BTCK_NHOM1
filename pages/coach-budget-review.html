@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Duyệt ngân sách · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="coach" data-page="coach-budget-review.html" data-title="Duyệt ngân sách học viên">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <section class="card">
+      <h2>Hàng chờ duyệt</h2>
+      <p class="text-small text-soft mt-1">
+        Duyệt ngân sách học viên gửi trong tháng 10/2026. Có thể <b>Duyệt</b> hoặc <b>Yêu cầu chỉnh sửa</b> kèm ghi chú.
+      </p>
+    </section>
+
+    <section class="card mt-5">
+      <div id="queueBox"></div>
+    </section>
+
+    <!-- ===== Lịch sử ghi chú tư vấn (coachNotes) ===== -->
+    <section class="card mt-5">
+      <h2 class="mb-3">📝 Ghi chú tư vấn gần đây</h2>
+      <div id="noteBox"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== Modal yêu cầu chỉnh sửa ===== -->
+<div class="modal-backdrop" id="noteModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="noteModalTitle">
+    <h3 id="noteModalTitle">Yêu cầu chỉnh sửa</h3>
+    <form id="noteForm" novalidate>
+      <p class="text-small text-soft mb-3">
+        Ghi chú sẽ gửi tới học viên kèm trạng thái "Cần chỉnh sửa".
+      </p>
+      <div class="field">
+        <label class="label" for="noteText">Ghi chú tư vấn *</label>
+        <textarea class="input" id="noteText" rows="3" placeholder="VD: Hạn mức ăn uống hơi cao so với thu nhập, nên giảm còn 1.8tr…"></textarea>
+        <p class="field-error" id="errNote" hidden>Vui lòng nhập ghi chú (tối thiểu 10 ký tự).</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn primary" type="submit">Gửi yêu cầu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang coach-budget-review — Coach duyệt ngân sách hoặc yêu cầu chỉnh sửa kèm ghi chú. */
+
+const MONTH = "2026-10";
+let reviewingId = null; // id ngân sách đang được yêu cầu chỉnh sửa
+
+/* ---------- 1. Hàng chờ duyệt ---------- */
+async function loadQueue() {
+  const box = SW.$("#queueBox");
+
+  await SW.loadInto(box, async () => {
+    const budgets = await API.list("budgets",
+      (b) => b.month === MONTH && (b.status === "pending" || b.status === "changes_requested"));
+
+    if (budgets.length === 0) {
+      return SW.empty("✅", "Không có ngân sách nào chờ duyệt.<br>Tất cả đã được xử lý!");
+    }
+
+    return budgets.map((budget) => {
+      const user = API.userName(budget.userId);
+      const category = API.categoryName(budget.categoryId);
+      const needsFix = budget.status === "changes_requested";
+      return `
+        <div class="card queue-card ${needsFix ? "needs-fix" : ""}">
+          <div class="row-between">
+            <div>
+              <b>${SW.escapeHtml(user.name)}</b> · ${category.icon} ${category.name}
+              — hạn mức <b>${SW.fmtVND(budget.amount)}</b>
+            </div>
+            <div class="actions">
+              ${SW.statusBadge(budget.status)}
+              <button class="btn sm" data-approve="${budget.id}">✓ Duyệt</button>
+              <button class="btn secondary sm" data-request="${budget.id}">✎ Yêu cầu chỉnh sửa</button>
+            </div>
+          </div>
+          ${needsFix && budget.note
+            ? `<p class="queue-note">💬 Ghi chú trước đó: ${SW.escapeHtml(budget.note)}</p>`
+            : ""}
+        </div>`;
+    }).join("");
+  }, SW.skeleton(2, 60));
+
+  bindQueueButtons();
+}
+
+/* Gắn sự kiện cho các nút vừa vẽ */
+function bindQueueButtons() {
+  const box = SW.$("#queueBox");
+
+  SW.onClick("[data-approve]", (button) =>
+    SW.runAction(() => API.update("budgets", button.dataset.approve, { status: "approved", note: "" }),
+      "Đã duyệt ngân sách.", () => { loadQueue(); loadNotes(); }), box);
+
+  SW.onClick("[data-request]", (button) => {
+    reviewingId = button.dataset.request;
+    SW.$("#noteText").value = "";
+    SW.clearErrors("#noteForm");
+    SW.openModal("noteModal");
+  }, box);
+}
+
+/* ---------- 2. Gửi yêu cầu chỉnh sửa ---------- */
+SW.$("#noteForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  SW.clearErrors("#noteForm");
+
+  const note = SW.$("#noteText").value.trim();
+  if (note.length < 10) {
+    SW.markInvalid("#noteText", "#errNote");
+    return;
+  }
+
+  try {
+    await API.update("budgets", reviewingId, { status: "changes_requested", note });
+    await API.create("coachNotes", { coachId: "c1", userId: "u1", budgetId: reviewingId, note });
+    SW.toast("Đã gửi yêu cầu chỉnh sửa kèm ghi chú.", "success");
+    SW.closeModal("noteModal");
+    loadQueue();
+    loadNotes();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  }
+});
+
+/* ---------- 3. Ghi chú tư vấn gần đây ---------- */
+async function loadNotes() {
+  const box = SW.$("#noteBox");
+
+  await SW.loadInto(box, async () => {
+    const notes = (await API.list("coachNotes", (n) => n.status !== "archived"))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 5);
+
+    if (notes.length === 0) return SW.empty("📝", "Chưa có ghi chú tư vấn nào.");
+
+    return SW.table(
+      "<th>Học viên</th><th>Ghi chú</th><th>Ngày</th>",
+      notes.map((note) => `
+        <tr>
+          <td>${SW.escapeHtml(API.userName(note.userId).name)}</td>
+          <td>${SW.escapeHtml(note.note)}</td>
+          <td>${SW.fmtDate(note.createdAt)}</td>
+        </tr>`));
+  }, SW.skeleton(1, 44));
+}
+
+/* ---------- 4. Khởi động ---------- */
+loadQueue();
+loadNotes();
+</script>
+</body>
+</html>

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mẫu AI · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="moderator" data-page="moderator-ai-template-management.html" data-title="Quản lý mẫu AI">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <section class="card row-between">
+      <div>
+        <h2>Mẫu prompt AI</h2>
+        <p class="text-small text-soft mt-1">
+          Kiểm duyệt viên quản lý các mẫu AI. Dùng <b>Chạy thử</b> để kiểm tra mẫu trước khi bật.
+        </p>
+      </div>
+      <button class="btn primary" id="addBtn">＋ Thêm mẫu</button>
+    </section>
+
+    <section class="card mt-5">
+      <div id="tplBox"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== Modal thêm / sửa mẫu ===== -->
+<div class="modal-backdrop" id="tModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tModalTitle">
+    <h3 id="tModalTitle">Thêm mẫu AI</h3>
+    <form id="tForm" novalidate>
+      <div class="field">
+        <label class="label" for="tName">Tên mẫu *</label>
+        <input class="input" id="tName" type="text" placeholder="VD: Gợi ý danh mục giao dịch v2">
+        <p class="field-error" id="errName" hidden>Vui lòng nhập tên mẫu.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="tPrompt">Nội dung prompt *</label>
+        <textarea class="input" id="tPrompt" rows="4" placeholder="Bạn là trợ lý tài chính. Hãy phân loại giao dịch sau…"></textarea>
+        <p class="field-error" id="errPrompt" hidden>Prompt cần tối thiểu 20 ký tự.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="tStatus">Trạng thái</label>
+        <select class="input" id="tStatus">
+          <option value="draft">Nháp</option>
+          <option value="active">Đang bật</option>
+          <option value="disabled">Tắt</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn primary" type="submit">Lưu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== Modal chạy thử (dùng AI thật của app) ===== -->
+<div class="modal-backdrop" id="testModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="testTitle">
+    <h3 id="testTitle">🧪 Chạy thử mẫu AI</h3>
+    <p id="testTplName" class="text-small text-soft mb-3"></p>
+    <div class="field">
+      <label class="label" for="testInput">Nhập tên giao dịch để thử</label>
+      <div class="row">
+        <input class="input grow" id="testInput" type="text" placeholder="VD: Xe ôm công nghệ đi học">
+        <button class="btn primary" id="testRun" type="button">Chạy</button>
+      </div>
+    </div>
+    <div id="testThinking" hidden class="mt-3">
+      <div class="skeleton skl" style="width:60%"></div>
+      <div class="skeleton skl" style="width:40%"></div>
+    </div>
+    <div class="ai-fail mt-3" id="testFail" hidden></div>
+    <div class="ai-result mt-3" id="testResult">
+      <p id="testText" class="fw-bold"></p>
+      <div class="ai-why" id="testWhy"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" type="button" data-close>Đóng</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang moderator-ai-template-management — Kiểm duyệt viên quản lý mẫu AI và chạy thử. */
+
+let editingId = null;
+
+const TEMPLATE_STATUS = {
+  active: ["Đang bật", "success"],
+  draft: ["Nháp", "muted"],
+  disabled: ["Đã tắt", "danger"],
+};
+
+function templateBadge(status) {
+  const item = TEMPLATE_STATUS[status] || [status, "muted"];
+  return SW.badge(item[0], item[1]);
+}
+
+/* ---------- 1. Danh sách mẫu AI ---------- */
+async function loadTemplates() {
+  const box = SW.$("#tplBox");
+
+  await SW.loadInto(box, async () => {
+    const items = await API.list("aiTemplates");
+
+    if (items.length === 0) return SW.empty("🤖", "Chưa có mẫu AI nào.");
+
+    return SW.table(
+      '<th>Tên mẫu</th><th>Prompt</th><th>Trạng thái</th><th class="actions-cell"></th>',
+      items.map((template) => `
+        <tr>
+          <td><b>${SW.escapeHtml(template.name)}</b></td>
+          <td class="prompt-cell">
+            <span class="text-small text-soft">
+              ${SW.escapeHtml(template.prompt.slice(0, 80))}${template.prompt.length > 80 ? "…" : ""}
+            </span>
+          </td>
+          <td>${templateBadge(template.status)}</td>
+          <td class="nowrap">
+            <button class="btn ghost sm" data-test="${template.id}">🧪 Chạy thử</button>
+            <button class="btn ghost sm" data-edit="${template.id}">Sửa</button>
+            <button class="btn danger sm" data-toggle="${template.id}">
+              ${template.status === "disabled" ? "Bật lại" : "Tắt"}
+            </button>
+          </td>
+        </tr>`));
+  }, SW.skeleton(2, 56));
+
+  bindTemplateButtons();
+}
+
+function bindTemplateButtons() {
+  const box = SW.$("#tplBox");
+
+  SW.onClick("[data-edit]", (button) => openEdit(button.dataset.edit), box);
+  SW.onClick("[data-test]", (button) => openTest(button.dataset.test), box);
+
+  SW.onClick("[data-toggle]", async (button) => {
+    const template = await API.get("aiTemplates", button.dataset.toggle);
+    const nextStatus = template.status === "disabled" ? "active" : "disabled";
+    const off = nextStatus === "disabled";
+    await SW.confirmAndRun(
+      off ? "Tắt mẫu AI này?" : "Bật lại mẫu AI?",
+      off ? "Tính năng dùng mẫu này sẽ ngừng hoạt động với người dùng."
+        : "Mẫu sẽ được áp dụng lại cho người dùng.",
+      () => API.update("aiTemplates", template.id, { status: nextStatus }),
+      off ? "Đã tắt mẫu." : "Đã bật lại mẫu.", loadTemplates);
+  }, box);
+}
+
+/* ---------- 2. Modal thêm / sửa ---------- */
+SW.$("#addBtn").addEventListener("click", () => {
+  editingId = null;
+  SW.$("#tModalTitle").textContent = "Thêm mẫu AI";
+  SW.$("#tForm").reset();
+  SW.clearErrors("#tForm");
+  SW.openModal("tModal");
+});
+
+async function openEdit(id) {
+  const template = await API.get("aiTemplates", id);
+  editingId = id;
+  SW.$("#tModalTitle").textContent = "Sửa mẫu AI";
+  SW.$("#tName").value = template.name;
+  SW.$("#tPrompt").value = template.prompt;
+  SW.$("#tStatus").value = template.status;
+  SW.clearErrors("#tForm");
+  SW.openModal("tModal");
+}
+
+SW.$("#tForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  SW.clearErrors("#tForm");
+
+  const name = SW.$("#tName").value.trim();
+  const prompt = SW.$("#tPrompt").value.trim();
+  let ok = true;
+  if (!name) { SW.markInvalid("#tName", "#errName"); ok = false; }
+  if (prompt.length < 20) { SW.markInvalid("#tPrompt", "#errPrompt"); ok = false; }
+  if (!ok) return;
+
+  const data = { name, prompt, status: SW.$("#tStatus").value };
+
+  try {
+    if (editingId) {
+      await API.update("aiTemplates", editingId, data);
+      SW.toast("Đã cập nhật mẫu AI.", "success");
+    } else {
+      await API.create("aiTemplates", data);
+      SW.toast("Đã thêm mẫu AI.", "success");
+    }
+    SW.closeModal("tModal");
+    loadTemplates();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  }
+});
+
+/* ---------- 3. Chạy thử mẫu bằng AI-1 của app ---------- */
+async function openTest(id) {
+  const template = await API.get("aiTemplates", id);
+  SW.$("#testTplName").textContent = "Mẫu: " + template.name;
+  SW.$("#testInput").value = "";
+  SW.$("#testThinking").hidden = true;
+  SW.$("#testFail").hidden = true;
+  SW.$("#testResult").classList.remove("show");
+  SW.openModal("testModal");
+}
+
+SW.$("#testRun").addEventListener("click", async () => {
+  SW.$("#testResult").classList.remove("show");
+  const res = await SW.runAI("#testThinking", "#testFail",
+    () => AI.categorize(SW.$("#testInput").value.trim()),
+    " — mẫu hoạt động đúng thiết kế: từ chối đầu vào không rõ.");
+  if (!res) return;
+
+  const category = API.categoryName(res.result.categoryId);
+  SW.$("#testText").textContent = "Kết quả: " + category.icon + " " + category.name +
+    " (tin cậy " + Math.round(res.result.confidence * 100) + "%)";
+  SW.$("#testWhy").innerHTML = "<b>Vì sao?</b> " + SW.escapeHtml(res.reason);
+  SW.$("#testResult").classList.add("show");
+});
+
+/* ---------- 4. Khởi động ---------- */
+loadTemplates();
+</script>
+</body>
+</html>

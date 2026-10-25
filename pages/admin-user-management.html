@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Người dùng · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="admin" data-page="admin-user-management.html" data-title="Quản lý người dùng">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <section class="card toolbar">
+      <div class="field grow">
+        <label class="label" for="q">Tìm người dùng</label>
+        <input class="input" id="q" type="search" placeholder="Tên hoặc email…">
+      </div>
+      <div class="field">
+        <label class="label" for="fRole">Vai trò</label>
+        <select class="input" id="fRole">
+          <option value="">Tất cả</option>
+          <option value="user">Người dùng</option>
+          <option value="coach">Huấn luyện viên</option>
+          <option value="moderator">Kiểm duyệt viên</option>
+          <option value="admin">Quản trị viên</option>
+        </select>
+      </div>
+      <button class="btn primary" id="addBtn">＋ Thêm người dùng</button>
+    </section>
+
+    <section class="card mt-5">
+      <div id="userBox"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== Modal thêm / sửa người dùng ===== -->
+<div class="modal-backdrop" id="uModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="uModalTitle">
+    <h3 id="uModalTitle">Thêm người dùng</h3>
+    <form id="uForm" novalidate>
+      <div class="field">
+        <label class="label" for="uName">Họ tên *</label>
+        <input class="input" id="uName" type="text" placeholder="Nguyễn Văn A">
+        <p class="field-error" id="errName" hidden>Vui lòng nhập họ tên.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="uEmail">Email *</label>
+        <input class="input" id="uEmail" type="email" placeholder="ten@domain.com">
+        <p class="field-error" id="errEmail" hidden>Email chưa hợp lệ.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="uRole">Vai trò *</label>
+        <select class="input" id="uRole">
+          <option value="user">Người dùng</option>
+          <option value="coach">Huấn luyện viên</option>
+          <option value="moderator">Kiểm duyệt viên</option>
+          <option value="admin">Quản trị viên</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" type="button" data-close>Huỷ</button>
+        <button class="btn primary" type="submit">Lưu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang admin-user-management — Quản trị viên xem, thêm, sửa và khoá/mở tài khoản. */
+
+let editingId = null;
+
+const ROLE_BADGE = {
+  user: ["Người dùng", "success"],
+  coach: ["Huấn luyện viên", "info"],
+  moderator: ["Kiểm duyệt viên", "purple"],
+  admin: ["Quản trị viên", "warning"],
+};
+
+function roleBadge(role) {
+  const item = ROLE_BADGE[role] || [role, "muted"];
+  return SW.badge(item[0], item[1]);
+}
+
+/* ---------- 1. Danh sách người dùng ---------- */
+async function loadUsers() {
+  const box = SW.$("#userBox");
+
+  await SW.loadInto(box, async () => {
+    const keyword = SW.$("#q").value.trim().toLowerCase();
+    const role = SW.$("#fRole").value;
+
+    const users = await API.list("users", (u) =>
+      (!keyword || u.name.toLowerCase().includes(keyword) || u.email.toLowerCase().includes(keyword)) &&
+      (!role || u.role === role));
+
+    if (users.length === 0) return SW.empty("👤", "Không có người dùng phù hợp.");
+
+    return SW.table(
+      '<th>Người dùng</th><th>Vai trò</th><th>Trạng thái</th><th class="actions-cell"></th>',
+      users.map((user) => {
+        const locked = user.status === "locked";
+        return `
+          <tr${locked ? ' class="is-archived"' : ""}>
+            <td>
+              <b>${SW.escapeHtml(user.name)}</b><br>
+              <span class="text-small text-muted">${SW.escapeHtml(user.email)}</span>
+            </td>
+            <td>${roleBadge(user.role)}</td>
+            <td>${SW.statusBadge(user.status)}</td>
+            <td class="nowrap">
+              <button class="btn ghost sm" data-edit="${user.id}">Sửa</button>
+              ${user.role !== "admin"
+                ? `<button class="btn ${locked ? "secondary" : "danger"} sm" data-lock="${user.id}">
+                     ${locked ? "Mở khoá" : "Khoá"}
+                   </button>`
+                : ""}
+            </td>
+          </tr>`;
+      }));
+  }, SW.skeleton(2, 44));
+
+  bindUserButtons();
+}
+
+function bindUserButtons() {
+  const box = SW.$("#userBox");
+
+  SW.onClick("[data-edit]", (button) => openEdit(button.dataset.edit), box);
+
+  SW.onClick("[data-lock]", async (button) => {
+    try {
+      const user = await API.get("users", button.dataset.lock);
+      const toLock = user.status !== "locked";
+      await SW.confirmAndRun(
+        toLock ? "Khoá tài khoản?" : "Mở khoá tài khoản?",
+        user.name + (toLock
+          ? " sẽ không thể đăng nhập cho đến khi được mở khoá."
+          : " sẽ đăng nhập được bình thường."),
+        () => API.update("users", user.id, { status: toLock ? "locked" : "active" }),
+        toLock ? "Đã khoá tài khoản." : "Đã mở khoá.", loadUsers);
+    } catch (err) {
+      SW.toast(err.message, "error");
+    }
+  }, box);
+}
+
+/* ---------- 2. Modal thêm / sửa ---------- */
+SW.$("#addBtn").addEventListener("click", () => {
+  editingId = null;
+  SW.$("#uModalTitle").textContent = "Thêm người dùng";
+  SW.$("#uForm").reset();
+  SW.clearErrors("#uForm");
+  SW.openModal("uModal");
+});
+
+async function openEdit(id) {
+  const user = await API.get("users", id);
+  editingId = id;
+  SW.$("#uModalTitle").textContent = "Sửa người dùng";
+  SW.$("#uName").value = user.name;
+  SW.$("#uEmail").value = user.email;
+  SW.$("#uRole").value = user.role;
+  SW.clearErrors("#uForm");
+  SW.openModal("uModal");
+}
+
+SW.$("#uForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  SW.clearErrors("#uForm");
+
+  const name = SW.$("#uName").value.trim();
+  const email = SW.$("#uEmail").value.trim();
+  const role = SW.$("#uRole").value;
+  let ok = true;
+  if (name.length < 2) { SW.markInvalid("#uName", "#errName"); ok = false; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { SW.markInvalid("#uEmail", "#errEmail"); ok = false; }
+  if (!ok) return;
+
+  try {
+    // Không cho trùng email với người dùng khác
+    const sameEmail = await API.list("users", (u) => u.email === email && u.id !== editingId);
+    if (sameEmail.length > 0) {
+      SW.toast("Email này đã tồn tại.", "error");
+      return;
+    }
+
+    if (editingId) {
+      await API.update("users", editingId, { name, email, role });
+      SW.toast("Đã cập nhật người dùng.", "success");
+    } else {
+      await API.create("users", { name, email, role, status: "active" });
+      SW.toast("Đã thêm người dùng.", "success");
+    }
+    SW.closeModal("uModal");
+    loadUsers();
+  } catch (err) {
+    SW.toast(err.message, "error");
+  }
+});
+
+/* ---------- 3. Sự kiện lọc + khởi động ---------- */
+SW.$("#q").addEventListener("input", SW.debounce(loadUsers, 250));
+SW.$("#fRole").addEventListener("change", loadUsers);
+loadUsers();
+</script>
+</body>
+</html>

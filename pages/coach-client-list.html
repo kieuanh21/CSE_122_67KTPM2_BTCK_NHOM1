@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Học viên · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body data-role="coach" data-page="coach-client-list.html" data-title="Danh sách học viên">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <section class="card toolbar">
+      <div class="field grow">
+        <label class="label" for="q">Tìm học viên</label>
+        <input class="input" id="q" type="search" placeholder="Tên học viên…">
+      </div>
+      <p class="hint">
+        Tổng quan thói quen chi tiêu của học viên để chuẩn bị tư vấn.
+      </p>
+    </section>
+
+    <!-- Danh sách học viên dạng card -->
+    <div id="clientBox" class="grid-cards wide mt-5"></div>
+  </main>
+</div>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → UI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+<script>
+/* Trang coach-client-list — Coach xem nhanh tình hình chi tiêu của từng học viên. */
+
+const MONTH = "2026-10"; // tháng dữ liệu mẫu
+
+/* ---------- 1. Tải và vẽ danh sách học viên ---------- */
+async function loadClients() {
+  const box = SW.$("#clientBox");
+
+  await SW.loadInto(box, async () => {
+    const keyword = SW.$("#q").value.trim().toLowerCase();
+    const clients = await API.list("users", (u) => u.role === "user" && u.status !== "locked");
+    const filtered = clients.filter((u) => !keyword || u.name.toLowerCase().includes(keyword));
+
+    if (filtered.length === 0) return SW.empty("👥", "Không tìm thấy học viên phù hợp.");
+
+    const cards = [];
+    for (const user of filtered) {
+      const txs = await API.list("transactions",
+        (t) => t.userId === user.id && t.status === "active" && t.date.slice(0, 7) === MONTH);
+      const goals = await API.list("goals", (g) => g.userId === user.id && g.status === "active");
+      const pending = await API.list("budgets",
+        (b) => b.userId === user.id && b.month === MONTH && b.status === "pending");
+
+      let spent = 0;
+      let income = 0;
+      const byCategory = {};
+      for (const t of txs) {
+        if (t.type === "expense") {
+          spent += t.amount;
+          byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + t.amount;
+        } else {
+          income += t.amount;
+        }
+      }
+
+      // Tìm danh mục chi nhiều nhất
+      let topText = "Chưa có dữ liệu";
+      const top = Object.entries(byCategory).sort((a, b) => b[1] - a[1])[0];
+      if (top) {
+        const category = API.categoryName(top[0]);
+        topText = `${category.icon} ${category.name} (${SW.fmtVND(top[1])})`;
+      }
+
+      cards.push(`
+        <article class="card">
+          <div class="row-between">
+            <h3>👤 ${SW.escapeHtml(user.name)}</h3>
+            ${pending.length > 0
+              ? `<span class="badge warning">${pending.length} ngân sách chờ duyệt</span>`
+              : '<span class="badge muted">Không có gì chờ duyệt</span>'}
+          </div>
+          <div class="kpi-grid compact">
+            <div class="kpi"><span class="kpi-label">Đã chi</span><strong class="kpi-value">${SW.fmtVND(spent)}</strong></div>
+            <div class="kpi"><span class="kpi-label">Thu nhập</span><strong class="kpi-value">${SW.fmtVND(income)}</strong></div>
+            <div class="kpi"><span class="kpi-label">Mục tiêu</span><strong class="kpi-value">${goals.length}</strong></div>
+          </div>
+          <p class="text-small text-soft">📌 Chi nhiều nhất: ${topText}</p>
+          <div class="actions mt-3">
+            <a class="btn secondary sm" href="coach-budget-review.html">Xem ngân sách chờ duyệt →</a>
+          </div>
+        </article>`);
+    }
+    return cards.join("");
+  }, SW.skeleton(2, 190));
+}
+
+/* ---------- 2. Sự kiện ---------- */
+SW.$("#q").addEventListener("input", SW.debounce(loadClients, 250));
+
+/* ---------- 3. Khởi động ---------- */
+loadClients();
+</script>
+</body>
+</html>
