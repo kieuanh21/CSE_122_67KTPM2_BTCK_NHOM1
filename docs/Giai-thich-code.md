@@ -201,7 +201,12 @@ Không. Là mô phỏng bằng quy tắc: AI-1 so khớp từ khoá, AI-2 so s�
 Bấm **⚠️ Mô phỏng lỗi** trên topbar. Cờ lưu trong `sessionStorage`; API/AI sẽ trả lỗi. Tải lại trang để thấy khung lỗi và nút **Thử lại**.
 
 **10. Ứng dụng có responsive không?**
-Có. Breakpoint 960px và 640px trong `css/style.css`: sidebar thu gọn, bảng chuyển cách hiển thị phù hợp màn hình nhỏ.
+Có. Toàn dự án chỉ dùng **một breakpoint 960px** (`css/style.css`, dòng 470–487):
+- Sidebar chuyển thành thanh điều hướng cố định ở đáy màn hình, chỉ còn 4 mục (ẩn logo, tên vai trò, phần chân).
+- `.main` giảm padding và thêm `padding-bottom: 90px` để nội dung không bị thanh đáy che.
+- `.grid-2` chuyển từ 2 cột về 1 cột.
+
+Bảng giao dịch không đổi bố cục mà nằm trong `.table-wrap` (`css/style.css`, dòng 223) có `overflow-x: auto` nên tự cuộn ngang trên điện thoại, không làm vỡ trang.
 
 **11. Vì sao dùng `innerHTML` để vẽ bảng?**
 Vì dữ liệu ít và cần đơn giản, dễ hiểu. Chuỗi HTML được tạo từ dữ liệu, các trường nhập người dùng được bọc bằng `escapeHtml` để tránh chèn mã.
