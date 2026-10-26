@@ -1,7 +1,3 @@
-/* SpendWise — giao diện dùng chung cho cả 19 trang.
-   Gồm: biến màu, bố cục, sidebar/topbar, nút, bảng, badge, modal, toast.
-   Muốn đổi màu hay khoảng cách toàn hệ thống thì sửa ở đây. */
-
 :root {
   /* --- Màu thương hiệu --- */
   --c-primary: #059669;
