@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Đăng nhập · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body class="auth-page">
+  <main class="card auth-card">
+    <div class="row-between">
+      <a href="../index.html" class="link-small">← Về trang chủ</a>
+      <button type="button" class="btn ghost sm theme-toggle" data-theme-toggle title="Đổi giao diện sáng/tối">🌙 Tối</button>
+    </div>
+    <div class="row mt-4 mb-4">
+      <span class="auth-logo" aria-hidden="true">💰</span>
+      <h1 class="auth-title">Đăng nhập SpendWise</h1>
+    </div>
+
+    <form id="loginForm" novalidate>
+      <div class="field">
+        <label class="label" for="email">Email</label>
+        <input class="input" id="email" type="email" placeholder="ban@spendwise.vn">
+        <p class="field-error" id="errEmail" hidden>Email chưa hợp lệ.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="pass">Mật khẩu</label>
+        <input class="input" id="pass" type="password" placeholder="••••••••">
+        <p class="field-error" id="errPass" hidden>Mật khẩu tối thiểu 6 ký tự.</p>
+      </div>
+      <div class="row-between mt-3">
+        <label class="text-small text-soft row">
+          <input type="checkbox" id="remember"> Ghi nhớ tôi
+        </label>
+        <a href="forgot-password.html" class="text-small">Quên mật khẩu?</a>
+      </div>
+      <button class="btn primary w-full mt-4" type="submit" id="loginBtn">Đăng nhập</button>
+      <p class="field-error text-center mt-3" id="loginError" hidden></p>
+    </form>
+
+    <p class="text-small text-soft text-center mt-4">
+      Chưa có tài khoản? <a href="register.html">Đăng ký ngay</a>
+    </p>
+
+    <hr class="divider">
+
+    <h2 class="subheading mb-3">🔑 Đăng nhập nhanh (demo theo vai trò)</h2>
+    <div class="quick-login mb-3">
+      <a class="btn secondary justify-start" href="user-finance-dashboard.html" data-quick="user">🧑‍💻 Người dùng — Minh</a>
+      <a class="btn secondary justify-start" href="coach-client-list.html" data-quick="coach">🧑‍🏫 Huấn luyện viên — Cô Lan</a>
+      <a class="btn secondary justify-start" href="moderator-resource-review.html" data-quick="moderator">🛡️ Kiểm duyệt viên</a>
+      <a class="btn secondary justify-start" href="admin-system-dashboard.html" data-quick="admin">🛠️ Quản trị viên</a>
+    </div>
+    <p class="text-small text-muted mt-3">
+      Nguyên mẫu Frontend: đăng nhập là mô phỏng, chưa có xác thực máy chủ.
+    </p>
+  </main>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → AI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+
+<script>
+/* Trang login — Đăng nhập: kiểm tra email/mật khẩu, chặn tài khoản bị khoá, lưu phiên và chuyển đúng vai trò. */
+(function () {
+  "use strict";
+  const { $, toast, login } = window.SW;
+
+  // Đăng nhập nhanh: lưu phiên để topbar hiện đúng tên người đang đăng nhập
+  document.querySelectorAll("[data-quick]").forEach((a) =>
+    a.addEventListener("click", () => {
+      const u = ((window.MOCK && window.MOCK.users) || []).find((x) => x.role === a.dataset.quick);
+      if (u) login(u);
+    }));
+
+  // Đảm bảo dữ liệu mẫu đã nạp vào LocalStorage ngay từ trang đăng nhập
+  window.API.list("users", () => true).catch(() => {});
+
+  $("#loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    window.SW.clearErrors("#loginForm");
+
+    const email = $("#email").value.trim();
+    const pass = $("#pass").value;
+    let ok = true;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { window.SW.markInvalid("#email", "#errEmail"); ok = false; }
+    if (pass.length < 6) { window.SW.markInvalid("#pass", "#errPass"); ok = false; }
+    if (!ok) return;
+
+    const btn = $("#loginBtn");
+    btn.disabled = true;
+    btn.textContent = "Đang đăng nhập…";
+    try {
+      const users = await window.API.list("users", (u) => u.email === email);
+      // Tài khoản demo dùng mật khẩu chung 123456; tài khoản tự đăng ký dùng mật khẩu đã đặt
+      if (!users.length || pass !== (users[0].password || "123456")) {
+        $("#loginError").textContent = "Email hoặc mật khẩu không đúng.";
+        $("#loginError").hidden = false;
+        return;
+      }
+      const u = users[0];
+      if (u.status === "locked") {
+        $("#loginError").textContent = "Tài khoản đã bị khoá. Liên hệ quản trị viên để được hỗ trợ.";
+        $("#loginError").hidden = false;
+        return;
+      }
+      login(u);
+      toast("Xin chào " + u.name + "!", "success");
+      const home = {
+        user: "user-finance-dashboard.html",
+        coach: "coach-client-list.html",
+        moderator: "moderator-resource-review.html",
+        admin: "admin-system-dashboard.html",
+      }[u.role] || "../index.html";
+      setTimeout(() => (location.href = home), 500);
+    } catch (err) {
+      $("#loginError").textContent = err.message;
+      $("#loginError").hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Đăng nhập";
+    }
+  });
+})();
+</script>
+</body>
+</html>
