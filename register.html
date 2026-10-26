@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Đăng ký · SpendWise</title>
+<script src="../js/theme.js"></script>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body class="auth-page">
+  <main class="card auth-card">
+    <div class="row-between">
+      <a href="../index.html" class="link-small">← Về trang chủ</a>
+      <button type="button" class="btn ghost sm theme-toggle" data-theme-toggle title="Đổi giao diện sáng/tối">🌙 Tối</button>
+    </div>
+    <div class="row mt-4 mb-4">
+      <span class="auth-logo" aria-hidden="true">💰</span>
+      <h1 class="auth-title">Đăng ký SpendWise</h1>
+    </div>
+
+    <form id="registerForm" novalidate>
+      <div class="field">
+        <label class="label" for="name">Họ và tên</label>
+        <input class="input" id="name" type="text" placeholder="Nguyễn Văn An">
+        <p class="field-error" id="errName" hidden>Vui lòng nhập họ tên (tối thiểu 2 ký tự).</p>
+      </div>
+      <div class="field">
+        <label class="label" for="email">Email</label>
+        <input class="input" id="email" type="email" placeholder="ban@spendwise.vn">
+        <p class="field-error" id="errEmail" hidden>Email chưa hợp lệ.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="pass">Mật khẩu</label>
+        <input class="input" id="pass" type="password" placeholder="••••••••">
+        <p class="field-error" id="errPass" hidden>Mật khẩu tối thiểu 6 ký tự.</p>
+      </div>
+      <div class="field">
+        <label class="label" for="pass2">Nhập lại mật khẩu</label>
+        <input class="input" id="pass2" type="password" placeholder="••••••••">
+        <p class="field-error" id="errPass2" hidden>Mật khẩu nhập lại không khớp.</p>
+      </div>
+      <button class="btn primary w-full mt-4" type="submit" id="registerBtn">Tạo tài khoản</button>
+      <p class="field-error text-center mt-3" id="registerError" hidden></p>
+    </form>
+
+    <p class="text-small text-soft text-center mt-5">
+      Đã có tài khoản? <a href="login.html">Đăng nhập</a>
+    </p>
+    <p class="text-small text-muted mt-3">
+      Nguyên mẫu Frontend: tài khoản mới được lưu cục bộ trong trình duyệt (LocalStorage), chưa có máy chủ.
+    </p>
+  </main>
+
+<!-- Bộ lõi dùng chung: dữ liệu → API → AI → layout -->
+<script src="../js/data.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/ai.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/layout.js"></script>
+
+
+<script>
+/* Trang register — Đăng ký: kiểm tra từng trường, không trùng email, lưu tài khoản mới vào LocalStorage. */
+(function () {
+  "use strict";
+  const { $, toast, login, clearErrors, markInvalid } = window.SW;
+
+  // Đảm bảo dữ liệu mẫu đã nạp vào LocalStorage
+  window.API.list("users", () => true).catch(() => {});
+
+  $("#registerForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    clearErrors("#registerForm");
+
+    const name = $("#name").value.trim();
+    const email = $("#email").value.trim().toLowerCase();
+    const pass = $("#pass").value;
+    const pass2 = $("#pass2").value;
+    let ok = true;
+    if (name.length < 2) { markInvalid("#name", "#errName"); ok = false; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { markInvalid("#email", "#errEmail"); ok = false; }
+    if (pass.length < 6) { markInvalid("#pass", "#errPass"); ok = false; }
+    if (pass2 !== pass) { markInvalid("#pass2", "#errPass2"); ok = false; }
+    if (!ok) return;
+
+    const btn = $("#registerBtn");
+    btn.disabled = true;
+    btn.textContent = "Đang tạo tài khoản…";
+    try {
+      const dup = await window.API.list("users", (u) => String(u.email).toLowerCase() === email);
+      if (dup.length) {
+        $("#registerError").textContent = "Email này đã được đăng ký. Hãy đăng nhập hoặc dùng email khác.";
+        $("#registerError").hidden = false;
+        return;
+      }
+      const user = await window.API.create("users", {
+        name: name,
+        email: email,
+        password: pass,
+        role: "user",
+        status: "active",
+        joined: new Date().toISOString().slice(0, 10)
+      });
+      login(user);
+      toast("Tạo tài khoản thành công. Xin chào " + user.name + "!", "success");
+      setTimeout(() => (location.href = "user-finance-dashboard.html"), 600);
+    } catch (err) {
+      $("#registerError").textContent = err.message;
+      $("#registerError").hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Tạo tài khoản";
+    }
+  });
+})();
+</script>
+</body>
+</html>
